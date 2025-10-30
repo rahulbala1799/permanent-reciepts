@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stripe File Automation - Receipts Automation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">Receipts Automation</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{{ url_for('index') }}">Dashboard</a>
+                <a class="nav-link" href="{{ url_for('receipts_page') }}">Reconciliation Jobs</a>
+                <a class="nav-link" href="/prepare/{{ job_id }}">Back to File Preparation</a>
+                <a class="nav-link active" href="#">Stripe Automation</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h1><i class="fas fa-cc-stripe text-info"></i> Stripe File Automation</h1>
+                <p class="lead">Upload Stripe file, view data, and apply automated adjustments</p>
+            </div>
+        </div>
+
+        <!-- Step 1: Upload Stripe File -->
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5><i class="fas fa-upload"></i> Step 1: Upload Stripe File</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label for="stripe-file" class="form-label">Select Stripe CSV File:</label>
+                                <input type="file" class="form-control" id="stripe-file" accept=".csv">
+                            </div>
+                            <div class="col-md-6 d-flex align-items-end">
+                                <button class="btn btn-info" onclick="uploadStripeFile()" id="upload-btn" disabled>
+                                    <i class="fas fa-cloud-upload-alt"></i> Upload & Load to Database
+                                </button>
+                                <button class="btn btn-danger ms-2" onclick="clearStripeData()" id="clear-btn" disabled>
+                                    <i class="fas fa-trash"></i> Clear Data
+                                </button>
+                            </div>
+                        </div>
+                        <div id="upload-status" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: View & Compare Data -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5><i class="fas fa-file-upload"></i> Original Uploaded Data</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-info btn-sm" onclick="viewOriginalData()" id="view-original-btn" disabled>
+                                <i class="fas fa-eye"></i> View Original
+                            </button>
+                            <button class="btn btn-secondary btn-sm ms-2" onclick="downloadOriginalData()" id="download-original-btn" disabled>
+                                <i class="fas fa-download"></i> Download
+                            </button>
+                        </div>
+                        <div class="mb-2">
+                            <span class="badge bg-info text-dark">PFR COLI Fees Total: <span id="pfr-fees-total">$0.00</span></span>
+                        </div>
+                        <div id="original-summary"></div>
+                        <div id="original-table-container"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5><i class="fas fa-check-circle"></i> Processed Data (After Adjustments)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <button class="btn btn-success btn-sm" onclick="viewProcessedData()" id="view-processed-btn" disabled>
+                                <i class="fas fa-eye"></i> View Processed
+                            </button>
+                            <button class="btn btn-primary btn-sm ms-2" onclick="downloadProcessedData()" id="download-processed-btn" disabled>
+                                <i class="fas fa-download"></i> Download (pfr_deleted.csv)
+                            </button>
+                        </div>
+                        <div id="processed-summary"></div>
+                        <div id="processed-table-container"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Reconciliation -->
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h5><i class="fas fa-balance-scale"></i> Reconciliation</h5>
+                    </div>
+                    <div class="card-body">
+                        <button class="btn btn-warning" onclick="showReconciliation()" id="recon-btn" disabled>
+                            <i class="fas fa-calculator"></i> Compare Original vs Processed
+                        </button>
+                        <div id="reconciliation-container" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Apply Adjustments -->
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h5><i class="fas fa-cogs"></i> Step 3: Apply Adjustments</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>Available Adjustments:</h6>
+                        <div class="list-group mt-3">
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">1. Fix Payment Failure Refunds</h6>
+                                        <p class="mb-0 text-muted">Extract payment ID from description, find matching charge/payment, and populate Customer ID & Client Number</p>
+                                    </div>
+                                    <button class="btn btn-warning" onclick="fixPaymentFailures()" id="fix-failures-btn" disabled>
+                                        <i class="fas fa-wrench"></i> Apply Fix
+                                    </button>
+                                </div>
+                                <div id="fix-failures-result" class="mt-2"></div>
+                            </div>
+                            
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">2. Remove Netted Transactions</h6>
+                                        <p class="mb-0 text-muted">If Payment Failure Refund amount equals the original Charge amount, remove both transactions (they net to zero)</p>
+                                    </div>
+                                    <button class="btn btn-danger" onclick="removeNettedTransactions()" id="remove-netted-btn" disabled>
+                                        <i class="fas fa-trash-alt"></i> Remove Netted
+                                    </button>
+                                </div>
+                                <div id="remove-netted-result" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const JOB_ID = {{ job_id }};
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Enable upload button when file is selected
+            document.getElementById('stripe-file').addEventListener('change', function(e) {
+                const uploadBtn = document.getElementById('upload-btn');
+                uploadBtn.disabled = !e.target.files.length;
+            });
+
+            // Check if data already exists
+            checkExistingData();
+        });
+
+        async function checkExistingData() {
+            try {
+                const response = await fetch(`/api/stripe-automation/status/${JOB_ID}`);
+                const data = await response.json();
+                
+                if (data.has_data) {
+                    document.getElementById('view-original-btn').disabled = false;
+                    document.getElementById('download-original-btn').disabled = false;
+                    document.getElementById('clear-btn').disabled = false;
+                    document.getElementById('fix-failures-btn').disabled = false;
+                    document.getElementById('remove-netted-btn').disabled = false;
+                    document.getElementById('recon-btn').disabled = false;
+                    loadPfrState();
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        async function loadPfrState() {
+            try {
+                const res = await fetch(`/api/stripe-automation/state/${JOB_ID}`);
+                const js = await res.json();
+                if (js.success) {
+                    updatePfrFeesDisplay(js.pfr_coli_fees_total);
+                }
+            } catch (e) {
+                console.warn('Failed to load PFR state', e);
+            }
+        }
+        function updatePfrFeesDisplay(val) {
+            const el = document.getElementById('pfr-fees-total');
+            if (el) {
+                const num = Number(val || 0);
+                el.textContent = `$${num.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            }
+        }
+
+        async function uploadStripeFile() {
+            const fileInput = document.getElementById('stripe-file');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file first');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                document.getElementById('upload-status').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-spinner fa-spin"></i> Uploading and loading to database...
+                    </div>
+                `;
+
+                const response = await fetch(`/api/stripe-automation/upload/${JOB_ID}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('upload-status').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> ${data.message}
+                            <br><strong>${data.row_count} rows</strong> loaded to database
+                        </div>
+                    `;
+                    document.getElementById('view-original-btn').disabled = false;
+                    document.getElementById('download-original-btn').disabled = false;
+                    document.getElementById('clear-btn').disabled = false;
+                    document.getElementById('fix-failures-btn').disabled = false;
+                    document.getElementById('remove-netted-btn').disabled = false;
+                    document.getElementById('recon-btn').disabled = false;
+                } else {
+                    document.getElementById('upload-status').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle"></i> Error: ${data.error}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('upload-status').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Error uploading file: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function viewOriginalData() {
+            try {
+                const response = await fetch(`/api/stripe-automation/data-original/${JOB_ID}`);
+                const data = await response.json();
+
+                if (data.success && data.rows.length > 0) {
+                    const totalNet = data.rows.reduce((sum, row) => sum + parseFloat(row.Net || 0), 0);
+                    document.getElementById('original-summary').innerHTML = `
+                        <div class="alert alert-info">
+                            <strong>${data.rows.length} rows</strong> | Total Net: <strong>$${totalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong>
+                        </div>
+                    `;
+                    document.getElementById('original-table-container').innerHTML = `<p class="text-muted">Original data loaded (click download to view full CSV)</p>`;
+                } else {
+                    document.getElementById('original-summary').innerHTML = `<div class="alert alert-warning">No data found</div>`;
+                }
+            } catch (error) {
+                document.getElementById('original-summary').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function viewProcessedData() {
+            try {
+                const response = await fetch(`/api/stripe-automation/data-processed/${JOB_ID}`);
+                const data = await response.json();
+
+                if (data.success && data.rows.length > 0) {
+                    const totalNet = data.rows.reduce((sum, row) => sum + parseFloat(row.Net || 0), 0);
+                    document.getElementById('processed-summary').innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>${data.rows.length} rows</strong> | Total Net: <strong>$${totalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong>
+                        </div>
+                    `;
+                    document.getElementById('processed-table-container').innerHTML = `<p class="text-muted">Processed data loaded (click download to view full CSV)</p>`;
+                    document.getElementById('view-processed-btn').disabled = false;
+                    document.getElementById('download-processed-btn').disabled = false;
+                } else {
+                    document.getElementById('processed-summary').innerHTML = `<div class="alert alert-warning">No processed data yet. Click "Fix Payment Failures" first.</div>`;
+                }
+            } catch (error) {
+                document.getElementById('processed-summary').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function downloadOriginalData() {
+            window.location.href = `/api/stripe-automation/download-original/${JOB_ID}`;
+        }
+        
+        function downloadProcessedData() {
+            window.location.href = `/api/stripe-automation/download/${JOB_ID}`;
+        }
+        
+        async function showReconciliation() {
+            try {
+                const [origResp, procResp] = await Promise.all([
+                    fetch(`/api/stripe-automation/data-original/${JOB_ID}`),
+                    fetch(`/api/stripe-automation/data-processed/${JOB_ID}`)
+                ]);
+                
+                const origData = await origResp.json();
+                const procData = await procResp.json();
+                
+                if (origData.success && procData.success) {
+                    const origTotalNet = origData.rows.reduce((sum, row) => sum + parseFloat(row.Net || 0), 0);
+                    const procTotalNet = procData.rows.reduce((sum, row) => sum + parseFloat(row.Net || 0), 0);
+                    const difference = origTotalNet - procTotalNet;
+                    
+                    document.getElementById('reconciliation-container').innerHTML = `
+                        <table class="table table-bordered">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Metric</th>
+                                    <th>Original</th>
+                                    <th>Processed</th>
+                                    <th>Difference</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Row Count</strong></td>
+                                    <td>${origData.rows.length}</td>
+                                    <td>${procData.rows.length}</td>
+                                    <td class="${origData.rows.length - procData.rows.length === 0 ? 'text-success' : 'text-warning'}">${origData.rows.length - procData.rows.length}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Total Net Amount</strong></td>
+                                    <td>$${origTotalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                    <td>$${procTotalNet.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                    <td class="${Math.abs(difference) < 0.01 ? 'text-success' : 'text-danger'}">
+                                        <strong>$${difference.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong>
+                                        ${Math.abs(difference) < 0.01 ? '✅ Balanced' : '⚠️ Unbalanced'}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="alert ${Math.abs(difference) < 0.01 ? 'alert-success' : 'alert-warning'}">
+                            ${Math.abs(difference) < 0.01 ? 
+                                '<strong>✅ Reconciliation Complete:</strong> Net amounts match! All deleted transactions netted to zero.' : 
+                                '<strong>⚠️ Warning:</strong> Net amounts differ by $' + Math.abs(difference).toFixed(2) + '. Review deleted transactions.'}
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('reconciliation-container').innerHTML = `<div class="alert alert-warning">Need both original and processed data to reconcile</div>`;
+                }
+            } catch (error) {
+                document.getElementById('reconciliation-container').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function clearStripeData() {
+            if (!confirm('Are you sure you want to clear all Stripe automation data?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stripe-automation/clear/${JOB_ID}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('upload-status').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> ${data.message}
+                        </div>
+                    `;
+                    document.getElementById('view-btn').disabled = true;
+                    document.getElementById('clear-btn').disabled = true;
+                    document.getElementById('fix-failures-btn').disabled = true;
+                    document.getElementById('remove-netted-btn').disabled = true;
+                    document.getElementById('data-summary').innerHTML = '';
+                    document.getElementById('data-table-container').innerHTML = '';
+                    document.getElementById('fix-failures-result').innerHTML = '';
+                    document.getElementById('remove-netted-result').innerHTML = '';
+                    document.getElementById('stripe-file').value = '';
+                    document.getElementById('upload-btn').disabled = true;
+                } else {
+                    alert('Error clearing data: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error clearing data: ' + error.message);
+            }
+        }
+
+        async function fixPaymentFailures() {
+            if (!confirm('This will update Payment Failure Refund rows with Customer ID and Client Number from matching charges. Continue?')) {
+                return;
+            }
+
+            try {
+                document.getElementById('fix-failures-result').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-spinner fa-spin"></i> Processing payment failures...
+                    </div>
+                `;
+
+                const response = await fetch(`/api/stripe-automation/fix-payment-failures/${JOB_ID}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('fix-failures-result').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> <strong>Success!</strong><br>
+                            Fixed: <strong>${data.fixed_count}</strong> payment failure refunds<br>
+                            Not found: <strong>${data.not_found_count}</strong> (no matching charge)<br>
+                            ${data.details ? '<br>' + data.details : ''}
+                            ${Array.isArray(data.replacements) && data.replacements.length > 0 ? `
+                                <div class="mt-2">
+                                    <details>
+                                        <summary>View replacements (${data.replacements.length})</summary>
+                                        <div class="table-responsive mt-2">
+                                            <table class="table table-sm table-bordered">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Refund ID</th>
+                                                        <th>Matched Reference</th>
+                                                        <th>Charge ID</th>
+                                                        <th>Customer ID</th>
+                                                        <th>Client Number</th>
+                                                        <th>PFR Tag</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${data.replacements.slice(0, 100).map(r => `
+                                                        <tr>
+                                                            <td>${r.refund_row_id || ''}</td>
+                                                            <td>${r.used_reference || ''}</td>
+                                                            <td>${r.original_charge_id || ''}</td>
+                                                            <td>${r.set_customer_id || ''}</td>
+                                                            <td>${r.set_client_number || ''}</td>
+                                                            <td>${r.pfr_tag || ''}</td>
+                                                        </tr>
+                                                    `).join('')}
+                                                </tbody>
+                                            </table>
+                                            ${data.replacements.length > 100 ? `<div class="text-muted">Showing first 100 of ${data.replacements.length}.</div>` : ''}
+                                        </div>
+                                    </details>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    
+                    // Enable processed data buttons
+                    const viewProcBtn = document.getElementById('view-processed-btn');
+                    const downloadProcBtn = document.getElementById('download-processed-btn');
+                    if (viewProcBtn) viewProcBtn.disabled = false;
+                    if (downloadProcBtn) downloadProcBtn.disabled = false;
+                    
+                    // Auto-load processed data
+                    viewProcessedData();
+                    // Update PFR state
+                    if (typeof data.pfr_coli_fees_total !== 'undefined') {
+                        updatePfrFeesDisplay(data.pfr_coli_fees_total);
+                    } else {
+                        loadPfrState();
+                    }
+                } else {
+                    document.getElementById('fix-failures-result').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle"></i> Error: ${data.error}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('fix-failures-result').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function removeNettedTransactions() {
+            if (!confirm('This will DELETE both the Payment Failure Refund and its matching Charge if their amounts net to zero. Continue?')) {
+                return;
+            }
+
+            try {
+                document.getElementById('remove-netted-result').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-spinner fa-spin"></i> Checking for netted transactions...
+                    </div>
+                `;
+
+                const response = await fetch(`/api/stripe-automation/remove-netted/${JOB_ID}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('remove-netted-result').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> <strong>Success!</strong><br>
+                            Removed: <strong>${data.removed_count}</strong> pairs of transactions (${data.removed_count * 2} total rows)<br>
+                            Kept: <strong>${data.kept_count}</strong> payment failure refunds (amounts don't match)<br>
+                            ${data.details ? '<br>' + data.details : ''}
+                            <br><strong>${data.remaining_rows} rows remaining</strong> in processed data
+                        </div>
+                    `;
+                    
+                    // Refresh the processed data view
+                    viewProcessedData();
+                } else {
+                    document.getElementById('remove-netted-result').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle"></i> Error: ${data.error}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('remove-netted-result').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
+

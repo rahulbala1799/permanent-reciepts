@@ -235,9 +235,15 @@
                                     </p>
                                 </div>
                                 <div class="col-md-4 text-center">
+                                    {% if subsidiary_id == 4 %}
+                                    <a href="/journals-eu/?job_id={{ job_id }}" class="btn btn-light btn-lg">
+                                        <i class="fas fa-external-link-alt"></i> Go to EU Journals Processing
+                                    </a>
+                                    {% else %}
                                     <a href="/journals/?job_id={{ job_id }}&subsidiary_id={{ subsidiary_id }}" class="btn btn-light btn-lg">
                                         <i class="fas fa-external-link-alt"></i> Go to Journals Processing
                                     </a>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>

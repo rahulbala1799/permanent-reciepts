@@ -1,0 +1,2 @@
+payment_date,client_id,invoice_number,billing_entity,ar_account,currency,exchange_rate,amount,account,Location,transtype,comment,Card Reference,reasoncode,sepaprovider,invoice #,payment #,Memo
+14/10/2025,81481,81481-DDI00008 - Summit,Ndevor Systems Ltd : Phorest Ireland,11010 Accounts Receivable : Trade Debtors,CAD,1.0,368.96,10150 Bank : CIBC Current Account 9066314,Canada,CARDSUCCESS,DDCARD PAYMENT:MESDDDNYE11HCS77FO764,2.0,,ch_3SI9SMGNUfzD46Hm1McgHM7E,CPMT: 81481-DDI00008,CPMT: 81481-DDI00008-14/10/2025,

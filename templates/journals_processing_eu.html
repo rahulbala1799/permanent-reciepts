@@ -225,9 +225,9 @@
         <a href="/journal-preparation" class="back-link">← Back to Journal Preparation</a>
         
         <h1>📊 Journals Processing</h1>
-        <p class="subtitle">Simplified Summit Installments Workflow</p>
+        <p class="subtitle">EU Summit Installments Processing (8 Journals)</p>
         <div style="background: #e3f2fd; padding: 10px 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #2196F3;">
-            <strong>📌 Current Context:</strong> Job ID: <span style="color: #1976D2;">{{ job_id }}</span> | Subsidiary ID: <span style="color: #1976D2;">{{ subsidiary_id }}</span>
+            <strong>📌 EU Subsidiary:</strong> Job ID: <span style="color: #1976D2;">{{ job_id }}</span>
         </div>
         
         <div class="dashboard">
@@ -413,7 +413,7 @@
         <!-- Step 2: Generate Journals -->
         <div class="section">
             <h2>Step 2: Generate Split Journals</h2>
-            <p style="margin-bottom: 15px; color: #666;">Generate journals (with or without Summit matching)</p>
+            <p style="margin-bottom: 15px; color: #666;">Generate 4 journals from matched results</p>
             
             <button class="button" id="generate-btn" onclick="generateJournals()" disabled>📄 Generate Journals</button>
             
@@ -440,9 +440,8 @@
     </div>
     
     <script>
-        // Get job_id and subsidiary_id from template variables (passed from Flask)
+        // Get job_id from template - EU only, no subsidiary_id
         const JOB_ID = {{ job_id }};
-        const SUBSIDIARY_ID = {{ subsidiary_id }};
         
         // Load status on page load
         document.addEventListener('DOMContentLoaded', () => {
@@ -466,37 +465,42 @@
         });
         
         function setupUploadFields() {
-            // Show appropriate upload fields based on subsidiary
-            if (SUBSIDIARY_ID === 4) { // EU
-                document.getElementById('non-eu-upload').style.display = 'none';
-                document.getElementById('eu-upload').style.display = 'block';
-                document.getElementById('upload-description').textContent = 'Upload EUR and AED journal files (8 total)';
-                
-                // Add event listeners for EU files
-                document.getElementById('main-eur-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Main_EU'));
-                document.getElementById('poa-eur-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'POA_EU'));
-                document.getElementById('cross-eur-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Cross_Subsidiary_EU'));
-                document.getElementById('refunds-eur-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Refunds_EU'));
-                document.getElementById('main-aed-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Main_AED'));
-                document.getElementById('poa-aed-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'POA_AED'));
-                document.getElementById('cross-aed-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Cross_Subsidiary_AED'));
-                document.getElementById('refunds-aed-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Refunds_AED'));
-            } else { // Non-EU
-                document.getElementById('non-eu-upload').style.display = 'grid';
-                document.getElementById('eu-upload').style.display = 'none';
-                document.getElementById('upload-description').textContent = 'Upload Main, POA, and Cross-Subsidiary journal files';
-                
-                // Add event listeners for non-EU files
-                document.getElementById('main-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Main'));
-                document.getElementById('poa-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'POA'));
-                document.getElementById('cross-file').addEventListener('change', (e) => handleJournalFileSelect(e, 'Cross_Subsidiary'));
-            }
+            // EU page - always show EU upload fields (8 files)
+            const nonEuEl = document.getElementById('non-eu-upload');
+            const euEl = document.getElementById('eu-upload');
+            
+            if (nonEuEl) nonEuEl.style.display = 'none';
+            if (euEl) euEl.style.display = 'block';
+            
+            const descEl = document.getElementById('upload-description');
+            if (descEl) descEl.textContent = 'Upload EUR and AED journal files (8 total)';
+            
+            // Add event listeners for EU files (with null checks)
+            const mainEur = document.getElementById('main-eur-file');
+            const poaEur = document.getElementById('poa-eur-file');
+            const crossEur = document.getElementById('cross-eur-file');
+            const refundsEur = document.getElementById('refunds-eur-file');
+            const mainAed = document.getElementById('main-aed-file');
+            const poaAed = document.getElementById('poa-aed-file');
+            const crossAed = document.getElementById('cross-aed-file');
+            const refundsAed = document.getElementById('refunds-aed-file');
+            
+            if (mainEur) mainEur.addEventListener('change', (e) => handleJournalFileSelect(e, 'Main_EU'));
+            if (poaEur) poaEur.addEventListener('change', (e) => handleJournalFileSelect(e, 'POA_EU'));
+            if (crossEur) crossEur.addEventListener('change', (e) => handleJournalFileSelect(e, 'Cross_Subsidiary_EU'));
+            if (refundsEur) refundsEur.addEventListener('change', (e) => handleJournalFileSelect(e, 'Refunds_EU'));
+            if (mainAed) mainAed.addEventListener('change', (e) => handleJournalFileSelect(e, 'Main_AED'));
+            if (poaAed) poaAed.addEventListener('change', (e) => handleJournalFileSelect(e, 'POA_AED'));
+            if (crossAed) crossAed.addEventListener('change', (e) => handleJournalFileSelect(e, 'Cross_Subsidiary_AED'));
+            if (refundsAed) refundsAed.addEventListener('change', (e) => handleJournalFileSelect(e, 'Refunds_AED'));
         }
         
         async function loadStatus() {
             try {
-                const response = await fetch(`/journals/api/status/${JOB_ID}/${SUBSIDIARY_ID}`);
+                const response = await fetch(`/journals-eu/api/status/${JOB_ID}`);
                 const data = await response.json();
+                
+                console.log('EU Status API Response:', data);
                 
                 if (!data.success) {
                     console.error('Status load failed:', data.error);
@@ -509,9 +513,15 @@
                 const summitCountEl = document.getElementById('summit-count');
                 const statusEl = document.getElementById('processing-status');
                 
-                if (origCountEl) origCountEl.textContent = data.original_journals.count;
-                if (origTotalEl) origTotalEl.textContent = `$${data.original_journals.total.toLocaleString()}`;
-                if (summitCountEl) summitCountEl.textContent = data.summit_uploaded ? data.summit_count : 'Not uploaded';
+                // Calculate totals from journal_counts and journal_totals
+                const totalCount = Object.values(data.journal_counts || {}).reduce((sum, count) => sum + count, 0);
+                const totalAmount = Object.values(data.journal_totals || {}).reduce((sum, amount) => sum + amount, 0);
+                
+                console.log('Calculated totals:', { totalCount, totalAmount });
+                
+                if (origCountEl) origCountEl.textContent = totalCount || '-';
+                if (origTotalEl) origTotalEl.textContent = totalCount > 0 ? `$${totalAmount.toLocaleString()}` : '$0.00';
+                if (summitCountEl) summitCountEl.textContent = data.summit_uploaded ? data.summit_count : '-';
                 
                 // Update status text
                 if (statusEl) {
@@ -553,9 +563,9 @@
                     viewResultsBtn.disabled = !data.match_complete;
                 }
                 
-                // Generate button - enable if journals are uploaded (matching is optional)
+                // Generate button - enable if matching is complete
                 if (generateBtn) {
-                    generateBtn.disabled = data.original_journals.count === 0;
+                    generateBtn.disabled = !data.match_complete;
                 }
                 
                 // Clear button - always enabled
@@ -623,7 +633,7 @@
                 
                 showAlert('info', `Uploading ${summit_data.length} installments...`);
                 
-                const response = await fetch(`/journals/api/upload-summit/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/upload-summit/${JOB_ID}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ summit_data })
@@ -662,7 +672,7 @@
             try {
                 showAlert('info', 'Matching clients...');
                 
-                const response = await fetch(`/journals/api/match-summit/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/match-summit/${JOB_ID}`, {
                     method: 'POST'
                 });
                 
@@ -717,7 +727,7 @@
         
         async function clearMatches() {
             try {
-                const response = await fetch(`/journals/api/clear-matches/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/clear-matches/${JOB_ID}`, {
                     method: 'DELETE'
                 });
                 
@@ -736,7 +746,7 @@
         }
         
         function viewMatchResults() {
-            window.open(`/journals/match-results/${JOB_ID}/${SUBSIDIARY_ID}`, '_blank');
+            window.open(`/journals-eu/match-results/${JOB_ID}`, '_blank');
         }
         
         async function generateJournals() {
@@ -747,7 +757,7 @@
             try {
                 showAlert('info', 'Generating journals...');
                 
-                const response = await fetch(`/journals/api/generate-journals/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/generate-journals/${JOB_ID}`, {
                     method: 'POST'
                 });
                 
@@ -766,54 +776,69 @@
                 if (result.success) {
                     showAlert('success', result.message);
                     
-                    // Show reconciliation table
+                    // Display generated files list
+                    const filesHTML = result.generated_files.map(file => `
+                        <div style="background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #667eea;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong style="font-size: 16px;">${file.journal_type}</strong>
+                                    <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                                        ${file.row_count} rows | $${file.total_amount.toLocaleString()}
+                                    </div>
+                                </div>
+                                <button onclick="downloadJournal('${file.journal_type}')" class="button" style="margin: 0;">
+                                    📥 Download
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                    
                     const recon = result.reconciliation;
                     
-                    if (!recon) {
-                        showAlert('error', 'No reconciliation data returned from server');
-                        console.error('Missing reconciliation in response:', result);
-                        return;
-                    }
-                    const hasDetails = Object.keys(recon.original_totals || {}).length > 0;
                     const reconHTML = `
-                        <h4 style="margin-bottom: 15px;">📊 Reconciliation</h4>
-                        <table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd;">
-                            <thead>
-                                <tr style="background: #667eea; color: white;">
-                                    <th style="padding: 10px; border: 1px solid #ddd;">Journal Type</th>
-                                    <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Original Amount</th>
-                                    <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">New Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${hasDetails ? Object.keys(recon.original_totals).map(type => `
-                                    <tr>
-                                        <td style="padding: 8px; border: 1px solid #ddd;">${type}</td>
-                                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${recon.original_totals[type].toLocaleString()}</td>
-                                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(recon.new_totals[type] || 0).toLocaleString()}</td>
+                        <h4 style="margin-bottom: 15px;">✅ Journals Generated Successfully</h4>
+                        ${filesHTML}
+                        
+                        <div style="margin-top: 30px;">
+                            <h4 style="margin-bottom: 15px;">📊 Reconciliation Summary</h4>
+                            <table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd;">
+                                <thead>
+                                    <tr style="background: #667eea; color: white;">
+                                        <th style="padding: 10px; border: 1px solid #ddd;">Journal Type</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">Original Amount</th>
+                                        <th style="padding: 10px; border: 1px solid #ddd; text-align: right;">New Amount</th>
                                     </tr>
-                                `).join('') : ''}
-                                ${recon.new_totals.Salon_Summit_Installments ? `
-                                    <tr style="background: #d4edda;">
-                                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Salon Summit Installments</strong></td>
-                                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">-</td>
-                                        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;"><strong>$${recon.new_totals.Salon_Summit_Installments.toLocaleString()}</strong></td>
+                                </thead>
+                                <tbody>
+                                    ${Object.keys(recon.original_breakdown).map(type => `
+                                        <tr>
+                                            <td style="padding: 8px; border: 1px solid #ddd;">${type}</td>
+                                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${recon.original_breakdown[type].toLocaleString()}</td>
+                                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">$${(recon.new_breakdown[type] || 0).toLocaleString()}</td>
+                                        </tr>
+                                    `).join('')}
+                                    ${recon.new_breakdown.Salon_Summit_Installments ? `
+                                        <tr style="background: #d4edda;">
+                                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Salon Summit Installments</strong></td>
+                                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">-</td>
+                                            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;"><strong>$${recon.new_breakdown.Salon_Summit_Installments.toLocaleString()}</strong></td>
+                                        </tr>
+                                    ` : ''}
+                                    <tr style="background: #f0f0f0; font-weight: bold;">
+                                        <td style="padding: 10px; border: 1px solid #ddd;">TOTAL</td>
+                                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$${recon.original_total.toLocaleString()}</td>
+                                        <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$${recon.new_total.toLocaleString()}</td>
                                     </tr>
-                                ` : ''}
-                                <tr style="background: #f0f0f0; font-weight: bold;">
-                                    <td style="padding: 10px; border: 1px solid #ddd;">TOTAL</td>
-                                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$${recon.original_grand_total.toLocaleString()}</td>
-                                    <td style="padding: 10px; border: 1px solid #ddd; text-align: right;">$${recon.new_grand_total.toLocaleString()}</td>
-                                </tr>
-                                <tr style="background: ${recon.balanced ? '#d4edda' : '#f8d7da'};">
-                                    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Difference</strong></td>
-                                    <td colspan="2" style="padding: 10px; border: 1px solid #ddd; text-align: center;">
-                                        <strong>${recon.balanced ? '✅' : '❌'} $${Math.abs(recon.difference).toLocaleString()}</strong>
-                                        ${recon.balanced ? ' (Balanced)' : ' (Not Balanced)'}
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                                    <tr style="background: ${recon.balanced ? '#d4edda' : '#f8d7da'};">
+                                        <td style="padding: 10px; border: 1px solid #ddd;"><strong>Difference</strong></td>
+                                        <td colspan="2" style="padding: 10px; border: 1px solid #ddd; text-align: center;">
+                                            <strong>${recon.balanced ? '✅' : '❌'} $${recon.difference.toLocaleString()}</strong>
+                                            ${recon.balanced ? ' (Balanced)' : ' (Not Balanced)'}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     `;
                     document.getElementById('reconciliation-table').innerHTML = reconHTML;
                     
@@ -870,7 +895,7 @@
             try {
                 showAlert('info', 'Processing summit installments...');
                 
-                const response = await fetch(`/journals/api/process/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/process/${JOB_ID}`, {
                     method: 'POST'
                 });
                 
@@ -908,51 +933,23 @@
         }
         
         async function clearAll() {
-            if (!confirm('Clear ALL summit data, matches, and generated journals?\n\nThis will:\n• Delete summit upload\n• Delete match results\n• Delete generated journals\n\nOriginal uploaded journals will remain intact.')) {
+            if (!confirm('Clear ALL data including uploaded journals?\n\nThis will delete EVERYTHING for this job.')) {
                 return;
             }
             
             try {
                 showAlert('info', 'Clearing all data...');
                 
-                // Clear summit data and processed journals
-                const clearResponse = await fetch(`/journals/api/clear/${JOB_ID}/${SUBSIDIARY_ID}`, {
-                    method: 'DELETE'
-                });
-                
-                // Clear match results
-                const matchClearResponse = await fetch(`/journals/api/clear-matches/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                // Clear everything - single endpoint
+                const clearResponse = await fetch(`/journals-eu/api/clear/${JOB_ID}`, {
                     method: 'DELETE'
                 });
                 
                 const result = await clearResponse.json();
                 
                 if (result.success) {
-                    showAlert('success', '✅ All data cleared! You can now re-upload summit file.');
-                    
-                    // Reset all UI elements
-                    const summitFile = document.getElementById('summit-file');
-                    const summitFileName = document.getElementById('summit-file-name');
-                    const matchSummary = document.getElementById('match-summary');
-                    const generationResult = document.getElementById('generation-result');
-                    const processResult = document.getElementById('process-result');
-                    const journalsList = document.getElementById('journals-list');
-                    
-                    if (summitFile) summitFile.value = '';
-                    if (summitFileName) summitFileName.textContent = '';
-                    if (matchSummary) matchSummary.style.display = 'none';
-                    if (generationResult) generationResult.classList.add('hidden');
-                    if (processResult) processResult.classList.add('hidden');
-                    if (journalsList) journalsList.innerHTML = '';
-                    
-                    // Reset button states
-                    document.getElementById('upload-summit-btn').disabled = true;
-                    document.getElementById('match-summit-btn').disabled = true;
-                    document.getElementById('view-results-btn').disabled = true;
-                    document.getElementById('generate-btn').disabled = true;
-                    document.getElementById('clear-summit-btn').disabled = false;
-                    
-                    loadStatus();
+                    showAlert('success', '✅ All data cleared! Reloading page...');
+                    setTimeout(() => window.location.reload(), 1000);
                 } else {
                     showAlert('error', result.error || 'Clear failed');
                 }
@@ -964,7 +961,7 @@
         
         async function loadJournals() {
             try {
-                const response = await fetch(`/journals/api/list-journals/${JOB_ID}/${SUBSIDIARY_ID}`);
+                const response = await fetch(`/journals-eu/api/list-journals/${JOB_ID}`);
                 const data = await response.json();
                 
                 if (!data.success || !data.journals || data.journals.length === 0) {
@@ -990,19 +987,19 @@
         }
         
         async function downloadJournal(journalType) {
-            window.location.href = `/journals/api/download/${JOB_ID}/${SUBSIDIARY_ID}/${journalType}`;
+            window.location.href = `/journals-eu/api/download/${JOB_ID}/${journalType}`;
         }
         
         function downloadJournalWithMemo(journalType) {
             const memo = document.getElementById('journal-memo')?.value || '';
             const encodedMemo = encodeURIComponent(memo);
-            window.location.href = `/journals/api/download/${JOB_ID}/${SUBSIDIARY_ID}/${journalType}?memo=${encodedMemo}`;
+            window.location.href = `/journals-eu/api/download/${JOB_ID}/${journalType}?memo=${encodedMemo}`;
         }
         
         function downloadAllJournalsWithMemo() {
             const memo = document.getElementById('journal-memo')?.value || '';
             const encodedMemo = encodeURIComponent(memo);
-            window.location.href = `/journals/api/download-all/${JOB_ID}/${SUBSIDIARY_ID}?memo=${encodedMemo}`;
+            window.location.href = `/journals-eu/api/download-all/${JOB_ID}?memo=${encodedMemo}`;
         }
         
         function showAlert(type, message) {
@@ -1020,77 +1017,46 @@
         
         async function loadJournalsUploadStatus() {
             try {
-                const response = await fetch(`/journals/api/journals-upload-status/${JOB_ID}/${SUBSIDIARY_ID}`);
+                const response = await fetch(`/journals-eu/api/journals-upload-status/${JOB_ID}`);
                 const data = await response.json();
                 
                 if (!data.success) return;
                 
-                if (SUBSIDIARY_ID === 4) { // EU
-                    // Update EU upload status badges
-                    const euTypes = ['Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED'];
-                    euTypes.forEach(type => {
-                        const key = type.toLowerCase().replace('_', '-');
-                        const statusEl = document.getElementById(`${key}-status`);
-                        const infoEl = document.getElementById(`${key}-info`);
-                        
-                        // Check if elements exist (they might not if page is still loading)
-                        if (!statusEl || !infoEl) {
-                            console.warn(`Missing DOM element for ${type}`);
-                            return;
-                        }
-                        
-                        if (data.uploaded[type]) {
-                            statusEl.style.display = 'inline-block';
-                            statusEl.className = 'status-badge status-success';
-                            infoEl.textContent = `${data.counts[type]} rows | $${data.totals[type].toLocaleString()}`;
-                        } else {
-                            statusEl.style.display = 'none';
-                            infoEl.textContent = '';
-                        }
-                    });
+                // EU page - always show EU upload status
+                const euTypes = ['Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED'];
+                euTypes.forEach(type => {
+                    const key = type.toLowerCase().replace('_', '-');
+                    const statusEl = document.getElementById(`${key}-status`);
+                    const infoEl = document.getElementById(`${key}-info`);
                     
-                    // Update view data button
-                    document.getElementById('view-data-btn').disabled = !data.all_uploaded;
-                    
-                    // Update summary
-                    if (data.all_uploaded) {
-                        const totalCount = euTypes.reduce((sum, type) => sum + (data.counts[type] || 0), 0);
-                        const totalAmount = euTypes.reduce((sum, type) => sum + (data.totals[type] || 0), 0);
-                        document.getElementById('upload-summary').innerHTML = 
-                            `<strong>✅ All 8 journals uploaded</strong> | ${totalCount} total rows | $${totalAmount.toLocaleString()}`;
-                    } else {
-                        const uploadedCount = euTypes.filter(type => data.uploaded[type]).length;
-                        document.getElementById('upload-summary').textContent = `Upload all 8 journals to continue (${uploadedCount}/8 uploaded)`;
+                    // Check if elements exist (they might not if page is still loading)
+                    if (!statusEl || !infoEl) {
+                        console.warn(`Missing DOM element for ${type}`);
+                        return;
                     }
-                } else { // Non-EU
-                    // Update non-EU upload status badges
-                    ['Main', 'POA', 'Cross_Subsidiary'].forEach(type => {
-                        const key = type === 'Cross_Subsidiary' ? 'cross' : type.toLowerCase();
-                        const statusEl = document.getElementById(`${key}-status`);
-                        const infoEl = document.getElementById(`${key}-info`);
-                        
-                        if (data.uploaded[type]) {
-                            statusEl.style.display = 'inline-block';
-                            statusEl.className = 'status-badge status-success';
-                            infoEl.textContent = `${data.counts[type]} rows | $${data.totals[type].toLocaleString()}`;
-                        } else {
-                            statusEl.style.display = 'none';
-                            infoEl.textContent = '';
-                        }
-                    });
                     
-                    // Update view data button
-                    document.getElementById('view-data-btn').disabled = !data.all_uploaded;
-                    
-                    // Update summary
-                    if (data.all_uploaded) {
-                        const totalCount = data.counts.Main + data.counts.POA + data.counts.Cross_Subsidiary;
-                        const totalAmount = data.totals.Main + data.totals.POA + data.totals.Cross_Subsidiary;
-                        document.getElementById('upload-summary').innerHTML = 
-                            `<strong>✅ All journals uploaded</strong> | ${totalCount} total rows | $${totalAmount.toLocaleString()}`;
+                    if (data.uploaded[type]) {
+                        statusEl.style.display = 'inline-block';
+                        statusEl.className = 'status-badge status-success';
+                        infoEl.textContent = `${data.counts[type]} rows | $${data.totals[type].toLocaleString()}`;
                     } else {
-                        document.getElementById('upload-summary').textContent = 'Upload all 3 journals to continue';
+                        statusEl.style.display = 'none';
+                        infoEl.textContent = '';
                     }
+                });
+                
+                // Update view data button
+                document.getElementById('view-data-btn').disabled = !data.all_uploaded;
+                
+                // Update summary
+                if (data.all_uploaded) {
+                    const totalCount = euTypes.reduce((sum, type) => sum + (data.counts[type] || 0), 0);
+                    const totalAmount = euTypes.reduce((sum, type) => sum + (data.totals[type] || 0), 0);
+                    document.getElementById('upload-summary').innerHTML = 
+                        `<strong>✅ Journals uploaded</strong> | ${totalCount} total rows | $${totalAmount.toLocaleString()}`;
+                } else {
+                    const uploadedCount = euTypes.filter(type => data.uploaded[type]).length;
+                    document.getElementById('upload-summary').textContent = `Upload EU journals to continue (${uploadedCount}/8 uploaded)`;
                 }
                 
             } catch (error) {
@@ -1141,7 +1107,7 @@
                 showAlert('info', `Uploading ${rows.length} rows...`);
                 
                 // Upload to server
-                const response = await fetch(`/journals/api/upload-journals/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/upload-journals/${JOB_ID}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1191,7 +1157,7 @@
         }
         
         function viewCombinedData() {
-            window.open(`/journals/view-data/${JOB_ID}/${SUBSIDIARY_ID}`, '_blank');
+            window.open(`/journals-eu/view-data/${JOB_ID}`, '_blank');
         }
         
         async function clearJournals() {
@@ -1200,7 +1166,7 @@
             }
             
             try {
-                const response = await fetch(`/journals/api/clear-journals/${JOB_ID}/${SUBSIDIARY_ID}`, {
+                const response = await fetch(`/journals-eu/api/clear/${JOB_ID}`, {
                     method: 'DELETE'
                 });
                 

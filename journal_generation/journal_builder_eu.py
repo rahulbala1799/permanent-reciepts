@@ -353,9 +353,42 @@ class JournalBuilderEU:
             }
     
     def export_journal_to_csv(self, df: pd.DataFrame, journal_name: str) -> io.BytesIO:
-        """Export journal DataFrame to CSV BytesIO"""
+        """Export journal DataFrame to CSV BytesIO with correct format"""
         output = io.BytesIO()
-        df.to_csv(output, index=False, encoding='utf-8')
+        
+        # Define the EXACT column order expected (matches USA/Canada format)
+        expected_columns = [
+            'payment_date', 'client_id', 'invoice_number', 'billing_entity', 'ar_account',
+            'currency', 'exchange_rate', 'amount', 'account', 'Location', 'transtype',
+            'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
+        ]
+        
+        # Create a copy to avoid modifying original
+        df_export = df.copy()
+        
+        # Generate invoice # and payment # for ALL rows
+        if 'client_id' in df_export.columns and 'invoice_number' in df_export.columns:
+            df_export['invoice #'] = df_export.apply(
+                lambda row: f"CPMT: {row['client_id']}-{row['invoice_number']}" 
+                if pd.notna(row.get('client_id')) and pd.notna(row.get('invoice_number')) 
+                else '', axis=1
+            )
+            df_export['payment #'] = df_export.apply(
+                lambda row: f"CPMT: {row['client_id']}-{row['invoice_number']}-{row['payment_date']}" 
+                if pd.notna(row.get('client_id')) and pd.notna(row.get('invoice_number')) and pd.notna(row.get('payment_date'))
+                else '', axis=1
+            )
+        
+        # Ensure all expected columns exist (add missing ones with empty values)
+        for col in expected_columns:
+            if col not in df_export.columns:
+                df_export[col] = ''
+        
+        # Select only the expected columns in the correct order
+        df_export = df_export[expected_columns]
+        
+        # Export to CSV
+        df_export.to_csv(output, index=False, encoding='utf-8')
         output.seek(0)
         return output
     

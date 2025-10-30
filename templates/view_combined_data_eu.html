@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EU Combined Journals Data Viewer</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 98%; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); padding: 30px; }
+        h1 { color: #667eea; margin-bottom: 20px; }
+        .dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; }
+        .stat-card h3 { font-size: 12px; opacity: 0.9; margin-bottom: 5px; }
+        .stat-card .value { font-size: 20px; font-weight: bold; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #667eea; text-decoration: none; font-weight: 500; }
+        .back-link:hover { text-decoration: underline; }
+        table.dataTable { width: 100% !important; font-size: 13px; }
+        table.dataTable th { background: #667eea; color: white; padding: 10px 8px !important; }
+        table.dataTable td { padding: 8px !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/journals-eu/?job_id={{ job_id }}" class="back-link">← Back to EU Journals Processing</a>
+        
+        <h1>📊 EU Combined Journals Data Viewer</h1>
+        
+        <div class="dashboard">
+            <div class="stat-card">
+                <h3>Total Rows</h3>
+                <div class="value">{{ total_count }}</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Amount</h3>
+                <div class="value">${{ "{:,.2f}".format(total_amount) }}</div>
+            </div>
+            {% for jtype, stats in type_breakdown.items() %}
+            <div class="stat-card">
+                <h3>{{ jtype.replace('_', ' ') }}</h3>
+                <div class="value" style="font-size: 16px;">{{ stats['count'] }} rows<br><span style="font-size: 14px;">${{ "{:,.2f}".format(stats['total']) }}</span></div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div style="overflow-x: auto;">
+            <table id="dataTable" class="display" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Journal Type</th>
+                        <th>Payment Date</th>
+                        <th>Client ID</th>
+                        <th>Invoice #</th>
+                        <th>Billing Entity</th>
+                        <th>AR Account</th>
+                        <th>Currency</th>
+                        <th>Exchange Rate</th>
+                        <th>Amount</th>
+                        <th>Account</th>
+                        <th>Location</th>
+                        <th>Trans Type</th>
+                        <th>Comment</th>
+                        <th>Card Ref</th>
+                        <th>Reason Code</th>
+                        <th>SEPA Provider</th>
+                        <th>Memo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr>
+                        <td><strong>{{ row.get('_journal_type', '') }}</strong></td>
+                        <td>{{ row.get('payment_date', '') }}</td>
+                        <td>{{ row.get('client_id', '') }}</td>
+                        <td>{{ row.get('invoice_number', '') }}</td>
+                        <td>{{ row.get('billing_entity', '') }}</td>
+                        <td>{{ row.get('ar_account', '') }}</td>
+                        <td>{{ row.get('currency', '') }}</td>
+                        <td>{{ row.get('exchange_rate', '') }}</td>
+                        <td style="text-align: right; font-weight: 500;">${{ "{:,.2f}".format(row.get('_amount', 0)) }}</td>
+                        <td>{{ row.get('account', '') }}</td>
+                        <td>{{ row.get('location', '') }}</td>
+                        <td>{{ row.get('transtype', '') }}</td>
+                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{{ row.get('comment', '') }}</td>
+                        <td>{{ row.get('card_reference', '') }}</td>
+                        <td>{{ row.get('reasoncode', '') }}</td>
+                        <td>{{ row.get('sepaprovider', '') }}</td>
+                        <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;">{{ row.get('memo', '') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#dataTable').DataTable({
+                pageLength: 100,
+                order: [[8, 'desc']], // Sort by amount descending
+                scrollX: true,
+                language: {
+                    search: "Search all columns:",
+                    lengthMenu: "Show _MENU_ rows",
+                    info: "Showing _START_ to _END_ of _TOTAL_ total rows",
+                    paginate: {
+                        first: "First",
+                        last: "Last",
+                        next: "Next",
+                        previous: "Previous"
+                    }
+                },
+                columnDefs: [
+                    { width: "120px", targets: 0 }, // Journal Type
+                    { width: "100px", targets: 2 }, // Client ID
+                    { width: "120px", targets: 3 }, // Invoice
+                    { width: "100px", targets: 8 }  // Amount
+                ]
+            });
+        });
+    </script>
+</body>
+</html>

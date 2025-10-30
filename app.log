@@ -1,9 +1,5 @@
  * Serving Flask app 'app'
  * Debug mode: on
-Address already in use
-Port 5001 is in use by another program. Either identify and stop that program, or start the server with a different port.
- * Serving Flask app 'app'
- * Debug mode: on
 [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on all addresses (0.0.0.0)
  * Running on http://127.0.0.1:5001
@@ -12,8 +8,48 @@ Port 5001 is in use by another program. Either identify and stop that program, o
  * Restarting with stat
  * Debugger is active!
  * Debugger PIN: 104-457-616
-127.0.0.1 - - [29/Oct/2025 18:27:48] "GET /journals/?job_id=1&subsidiary_id=4 HTTP/1.1" 200 -
-127.0.0.1 - - [29/Oct/2025 18:27:48] "[33mGET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1[0m" 404 -
-127.0.0.1 - - [29/Oct/2025 18:27:49] "GET /journals/api/status/1/4 HTTP/1.1" 200 -
-127.0.0.1 - - [29/Oct/2025 18:27:49] "GET /journals/api/journals-upload-status/1/4 HTTP/1.1" 200 -
-127.0.0.1 - - [29/Oct/2025 18:27:57] "[35m[1mPOST /journals/api/generate-journals/1/4 HTTP/1.1[0m" 500 -
+ * Detected change in '/Users/rahul/Documents/1 New Apps/mend/Permanent Reciepts/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 104-457-616
+127.0.0.1 - - [30/Oct/2025 14:45:26] "GET /stripe-automation/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:26] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [30/Oct/2025 14:45:26] "GET /api/stripe-automation/status/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:26] "GET /api/stripe-automation/state/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:32] "POST /api/stripe-automation/fix-payment-failures/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:32] "GET /api/stripe-automation/data-processed/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:36] "POST /api/stripe-automation/remove-netted/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:36] "GET /api/stripe-automation/data-processed/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:45:41] "GET /api/stripe-automation/download/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:34] "GET /reconciliation/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:34] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [30/Oct/2025 14:46:35] "GET /api/subsidiaries HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:35] "GET /api/jobs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "GET /reconciliation/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "GET /api/subsidiaries HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "GET /api/jobs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "GET /api/stripe-transactions/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:36] "GET /api/cashbook-transactions/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:38] "GET /reconciliation-process/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:38] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [30/Oct/2025 14:46:38] "GET /api/jobs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:38] "POST /api/start-reconciliation/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:46:38] "GET /api/matched-transactions-results/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:47:22] "GET /reconciliation/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:47:22] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+127.0.0.1 - - [30/Oct/2025 14:47:22] "GET /api/subsidiaries HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:47:22] "GET /api/jobs/1 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:47:23] "GET /api/cashbook-transactions/1/4 HTTP/1.1" 200 -
+127.0.0.1 - - [30/Oct/2025 14:47:23] "GET /api/stripe-transactions/1/4 HTTP/1.1" 200 -
+/Users/rahul/Documents/1 New Apps/mend/Permanent Reciepts/app.py:1081: DeprecationWarning: 
+Pyarrow will become a required dependency of pandas in the next major release of pandas (pandas 3.0),
+(to allow more performant data types, such as the Arrow string type, and better interoperability with other libraries)
+but was not found to be installed on your system.
+If this would cause problems for you,
+please provide us feedback at https://github.com/pandas-dev/pandas/issues/54466
+        
+  import pandas as pd
+/Users/rahul/Documents/1 New Apps/mend/Permanent Reciepts/app.py:1174: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  uploaded_at=datetime.utcnow()
+127.0.0.1 - - [30/Oct/2025 14:47:43] "POST /api/stripe-upload/1/4 HTTP/1.1" 200 -

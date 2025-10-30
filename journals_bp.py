@@ -411,10 +411,8 @@ def generate_journals(job_id, subsidiary_id):
         if not dataset:
             return jsonify({'success': False, 'error': 'No dataset found'}), 400
         
-        # Check if matching was done
+        # Check if matching was done (optional - can generate without matches)
         match_results = FPMatchResult.query.filter_by(dataset_id=dataset.id, match_status='matched').all()
-        if not match_results:
-            return jsonify({'success': False, 'error': 'No matched results found. Run matching first.'}), 400
         
         # Get original journal rows
         original_rows = FPJournalRow.query.filter_by(dataset_id=dataset.id).all()
@@ -718,12 +716,25 @@ def process_summit(job_id, subsidiary_id):
             # Create summit installment row
             first_row = client_rows[0]
             summit_row_data = {}
+            original_billing_entity = ''
             if first_row.row_json:
                 try:
                     summit_row_data = json.loads(first_row.row_json)
+                    original_billing_entity = summit_row_data.get('billing_entity', '')
                 except Exception as e:
                     print(f"WARNING: Failed to parse summit row_json: {e}")
                     pass
+            
+            # ALWAYS set billing entity to Ireland for Summit journals
+            summit_row_data['billing_entity'] = 'Ndevor Systems Ltd : Phorest Ireland'
+            
+            # Set account (bank) based on ORIGINAL billing entity and currency
+            if 'Germany' in original_billing_entity:
+                summit_row_data['account'] = '10010c Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c Ä # 17013705 (Germany)'
+            elif summit_row_data.get('currency') == 'USD':
+                summit_row_data['account'] = '10040a Bank : Dummy Interco Bank Accounts : Interco - SVB current a/c # 5468 & CIBC # 5090'
+            elif summit_row_data.get('currency') == 'GBP':
+                summit_row_data['account'] = '10020a Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c ¬£ # 62100285'
             
             summit_row = FPProcessedJournal(
                 dataset_id=dataset.id,
@@ -737,7 +748,7 @@ def process_summit(job_id, subsidiary_id):
                     **summit_row_data,
                     'amount': installment_amount,
                     'journal_type': 'Salon_Summit_Installments'
-                })
+                }, ensure_ascii=False)
             )
             db.session.add(summit_row)
             
@@ -824,11 +835,14 @@ def clear_processing(job_id, subsidiary_id):
 
 @journals_bp.route('/api/download/<int:job_id>/<int:subsidiary_id>/<journal_type>')
 def download_journal(job_id, subsidiary_id, journal_type):
-    """Download processed journal as CSV"""
+    """Download processed journal as CSV with optional memo"""
     try:
         dataset = FPDataset.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).first()
         if not dataset:
             return jsonify({'success': False, 'error': 'No dataset found'}), 404
+        
+        # Get memo parameter
+        memo = request.args.get('memo', '').strip()
         
         # Get rows for this journal type
         rows = FPProcessedJournal.query.filter_by(
@@ -837,14 +851,9 @@ def download_journal(job_id, subsidiary_id, journal_type):
         ).all()
         
         if not rows:
-            # Check if generation was done at all
-            any_generated = FPProcessedJournal.query.filter_by(dataset_id=dataset.id).first()
-            if not any_generated:
-                return jsonify({'success': False, 'error': f'No journals generated yet. Click "Generate Journals" button first.'}), 404
-            else:
-                return jsonify({'success': False, 'error': f'No rows found for {journal_type}. This journal type may be empty.'}), 404
+            return jsonify({'success': False, 'error': f'No rows found for {journal_type}'}), 404
         
-        # Create CSV file
+        # Create CSV
         output_dir = f"generated_journals/job_{job_id}_sub_{subsidiary_id}"
         os.makedirs(output_dir, exist_ok=True)
         
@@ -852,37 +861,185 @@ def download_journal(job_id, subsidiary_id, journal_type):
         filename = f"{journal_type}_{subsidiary_id}_{timestamp}.csv"
         filepath = os.path.join(output_dir, filename)
         
-        # Get headers from first row
-        if rows[0].row_json:
-            try:
-                sample_data = json.loads(rows[0].row_json)
-                headers = list(sample_data.keys())
-            except:
-                headers = ['client_id', 'invoice_number', 'amount', 'journal_type']
-        else:
-            headers = ['client_id', 'invoice_number', 'amount', 'journal_type']
+        # Define the EXACT headers expected for all journals (universal format)
+        headers = [
+            'payment_date', 'client_id', 'invoice_number', 'billing_entity', 'ar_account',
+            'currency', 'exchange_rate', 'amount', 'account', 'Location', 'transtype',
+            'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
+        ]
         
-        # Write CSV
+        # Write CSV with EXACT expected format
         with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            writer = csv.DictWriter(csvfile, fieldnames=headers, extrasaction='ignore')
             writer.writeheader()
             
             for row in rows:
                 if row.row_json:
                     try:
-                        row_data = json.loads(row.row_json)
-                        row_data['amount'] = row.amount  # Ensure updated amount
-                        writer.writerow(row_data)
-                    except:
-                        writer.writerow({
-                            'client_id': row.client_id,
-                            'invoice_number': row.invoice_number,
-                            'amount': row.amount,
-                            'journal_type': row.journal_type
-                        })
+                        # Ensure proper UTF-8 decoding
+                        if isinstance(row.row_json, bytes):
+                            row_data = json.loads(row.row_json.decode('utf-8'))
+                        else:
+                            row_data = json.loads(row.row_json, strict=False)
+                        # Update amount with the processed amount (after installment reduction)
+                        row_data['amount'] = str(row.amount)
+                        
+                        # Map columns to expected names (if they have different names in uploaded data)
+                        output_row = {}
+                        for header in headers:
+                            if header == 'Location':
+                                output_row['Location'] = row_data.get('location', row_data.get('Location', ''))
+                            elif header == 'Card Reference':
+                                output_row['Card Reference'] = row_data.get('card_reference', row_data.get('Card Reference', ''))
+                            elif header == 'Memo':
+                                # Use the memo parameter if provided, otherwise use original
+                                output_row['Memo'] = memo if memo else row_data.get('memo', row_data.get('Memo', ''))
+                            elif header == 'invoice #':
+                                # ALWAYS regenerate invoice # - don't use old values with 'nan'
+                                client_id = row_data.get('client_id', '')
+                                invoice_num = row_data.get('invoice_number', '')
+                                if client_id and invoice_num and client_id != 'nan' and invoice_num != 'nan':
+                                    invoice_hash = f"CPMT: {client_id}-{invoice_num}"
+                                    # Append "-Summit" for Salon Summit journals
+                                    if journal_type == 'Salon_Summit_Installments':
+                                        invoice_hash += '-Summit'
+                                    output_row['invoice #'] = invoice_hash
+                                else:
+                                    output_row['invoice #'] = ''
+                            elif header == 'payment #':
+                                # ALWAYS regenerate payment # - don't use old values with 'nan'
+                                client_id = row_data.get('client_id', '')
+                                invoice_num = row_data.get('invoice_number', '')
+                                payment_date = row_data.get('payment_date', '')
+                                if client_id and invoice_num and payment_date and client_id != 'nan' and invoice_num != 'nan' and payment_date != 'nan':
+                                    payment_hash = f"CPMT: {client_id}-{invoice_num}-{payment_date}"
+                                    # Append "-Summit" for Salon Summit journals
+                                    if journal_type == 'Salon_Summit_Installments':
+                                        payment_hash += '-Summit'
+                                    output_row['payment #'] = payment_hash
+                                else:
+                                    output_row['payment #'] = ''
+                            else:
+                                output_row[header] = row_data.get(header, '')
+                        
+                        writer.writerow(output_row)
+                    except Exception as e:
+                        print(f"Error writing row: {e}")
+                        continue
         
         return send_file(filepath, as_attachment=True, download_name=filename)
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@journals_bp.route('/api/download-all/<int:job_id>/<int:subsidiary_id>')
+def download_all_journals(job_id, subsidiary_id):
+    """Download all generated journals as a ZIP file with optional memo"""
+    import zipfile
+    import io
     
+    try:
+        dataset = FPDataset.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).first()
+        if not dataset:
+            return jsonify({'success': False, 'error': 'No dataset found'}), 404
+        
+        # Get memo parameter
+        memo = request.args.get('memo', '').strip()
+        
+        # Get all unique journal types
+        journal_types = db.session.query(FPProcessedJournal.journal_type).filter_by(
+            dataset_id=dataset.id
+        ).distinct().all()
+        
+        if not journal_types:
+            return jsonify({'success': False, 'error': 'No generated journals found'}), 404
+        
+        # Create ZIP in memory
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for (jtype,) in journal_types:
+                # Generate CSV for each journal type
+                rows = FPProcessedJournal.query.filter_by(
+                    dataset_id=dataset.id,
+                    journal_type=jtype
+                ).all()
+                
+                if not rows:
+                    continue
+                
+                # Define expected columns
+                headers = [
+                    'payment_date', 'client_id', 'invoice_number', 'billing_entity', 'ar_account',
+                    'currency', 'exchange_rate', 'amount', 'account', 'Location', 'transtype',
+                    'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
+                ]
+                
+                # Create CSV content
+                csv_content = io.StringIO()
+                writer = csv.DictWriter(csv_content, fieldnames=headers, extrasaction='ignore')
+                writer.writeheader()
+                
+                for row in rows:
+                    if row.row_json:
+                        try:
+                            if isinstance(row.row_json, bytes):
+                                row_data = json.loads(row.row_json.decode('utf-8'))
+                            else:
+                                row_data = json.loads(row.row_json, strict=False)
+                            
+                            row_data['amount'] = str(row.amount)
+                            
+                            # Build output row with proper column mapping
+                            output_row = {}
+                            for header in headers:
+                                if header == 'Location':
+                                    output_row['Location'] = row_data.get('location', row_data.get('Location', ''))
+                                elif header == 'Card Reference':
+                                    output_row['Card Reference'] = row_data.get('card_reference', row_data.get('Card Reference', ''))
+                                elif header == 'Memo':
+                                    output_row['Memo'] = memo if memo else row_data.get('memo', row_data.get('Memo', ''))
+                                elif header == 'invoice #':
+                                    client_id = row_data.get('client_id', '')
+                                    invoice_num = row_data.get('invoice_number', '')
+                                    if client_id and invoice_num and client_id != 'nan' and invoice_num != 'nan':
+                                        invoice_hash = f"CPMT: {client_id}-{invoice_num}"
+                                        if jtype == 'Salon_Summit_Installments':
+                                            invoice_hash += '-Summit'
+                                        output_row['invoice #'] = invoice_hash
+                                    else:
+                                        output_row['invoice #'] = ''
+                                elif header == 'payment #':
+                                    client_id = row_data.get('client_id', '')
+                                    invoice_num = row_data.get('invoice_number', '')
+                                    payment_date = row_data.get('payment_date', '')
+                                    if client_id and invoice_num and payment_date and client_id != 'nan' and invoice_num != 'nan' and payment_date != 'nan':
+                                        payment_hash = f"CPMT: {client_id}-{invoice_num}-{payment_date}"
+                                        if jtype == 'Salon_Summit_Installments':
+                                            payment_hash += '-Summit'
+                                        output_row['payment #'] = payment_hash
+                                    else:
+                                        output_row['payment #'] = ''
+                                else:
+                                    output_row[header] = row_data.get(header, '')
+                            
+                            writer.writerow(output_row)
+                        except Exception as e:
+                            print(f"Error writing row: {e}")
+                            continue
+                
+                # Add CSV to ZIP
+                csv_bytes = csv_content.getvalue().encode('utf-8')
+                zf.writestr(f"{jtype}.csv", csv_bytes)
+        
+        memory_file.seek(0)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'Journals_Job{job_id}_Sub{subsidiary_id}_{timestamp}.zip'
+        )
+        
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

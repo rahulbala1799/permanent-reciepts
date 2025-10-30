@@ -634,8 +634,34 @@ def create_models(db):
         amount = Column(Float, default=0)
         row_json = Column(Text)
         created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # ==================== STRIPE AUTOMATION TABLES ====================
+    class StripeAutomationData(db.Model):
+        """Stripe file automation - uploaded raw data (ORIGINAL, never modified)"""
+        __tablename__ = 'stripe_automation_data'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)  # Store full row as JSON
+        created_at = Column(DateTime, default=datetime.utcnow)
+    
+    class StripeAutomationProcessed(db.Model):
+        """Stripe file automation - processed data (after adjustments)"""
+        __tablename__ = 'stripe_automation_processed'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)  # Store full row as JSON
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class StripeAutomationState(db.Model):
+        """Stripe automation state per job (persistent metrics)"""
+        __tablename__ = 'stripe_automation_state'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False, unique=True)
+        pfr_coli_fees_total = Column(Float, nullable=True)
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     return (Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction,
             LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction,
             FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult,
-            FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU)
+            FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU,
+            StripeAutomationData, StripeAutomationProcessed, StripeAutomationState)

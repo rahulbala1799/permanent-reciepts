@@ -94,6 +94,24 @@
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- New Row for Stripe File Automation -->
+                        <div class="row mt-3">
+                            <div class="col-md-4">
+                                <div class="card h-100 preparation-process" onclick="openStripeAutomation()">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-cc-stripe fa-3x text-info mb-3"></i>
+                                        <h5 class="card-title">Stripe File Automation</h5>
+                                        <p class="card-text">Upload and process Stripe files with automated adjustments</p>
+                                        <div class="mt-auto">
+                                            <button class="btn btn-outline-info">
+                                                <i class="fas fa-robot"></i> Start Automation
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -637,10 +655,15 @@
             // Navigate to Looker Cashbook preparation page
             window.location.href = `/prepare/looker-cashbook/${jobId}`;
         }
-
+        
         function openStandardConversion() {
             // Show the file upload section for standard conversion
             document.getElementById('file-upload-section').scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function openStripeAutomation() {
+            // Navigate to Stripe File Automation page
+            window.location.href = `/stripe-automation/${jobId}`;
         }
 
         function openCustomMapping() {

@@ -26,7 +26,7 @@ migrate.init_app(app, db)
 
 # Import and create models after db is initialized
 from models import create_models
-Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction, LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction, FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult, FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU = create_models(db)
+Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction, LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction, FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult, FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU, StripeAutomationData, StripeAutomationProcessed, StripeAutomationState = create_models(db)
 
 # Register Journals Processing Blueprint
 from journals_bp import journals_bp, init_blueprint
@@ -39,6 +39,17 @@ init_blueprint(db, {
 })
 app.register_blueprint(journals_bp)
 
+# Register EU Journals Processing Blueprint
+from journals_eu_bp import journals_eu_bp, init_blueprint as init_eu_blueprint
+init_eu_blueprint(db, {
+    'FPDatasetEU': FPDatasetEU,
+    'FPJournalRowEU': FPJournalRowEU,
+    'FPSummitInstallmentEU': FPSummitInstallmentEU,
+    'FPMatchResultEU': FPMatchResultEU,
+    'FPProcessedJournalEU': FPProcessedJournalEU
+})
+app.register_blueprint(journals_eu_bp)
+
 # Make models globally available
 globals()['Receipt'] = Receipt
 globals()['ProcessingJob'] = ProcessingJob
@@ -49,6 +60,13 @@ globals()['LookerCashbookTransaction'] = LookerCashbookTransaction
 globals()['MatchedTransaction'] = MatchedTransaction
 globals()['ReconciliationResults'] = ReconciliationResults
 globals()['JournalTransaction'] = JournalTransaction
+
+# Ensure all tables exist (including newly added state tables)
+with app.app_context():
+    try:
+        db.create_all()
+    except Exception as e:
+        print(f"WARN: db.create_all() failed: {e}")
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -248,6 +266,11 @@ def looker_cashbook_page(job_id):
 def looker_data_page(job_id):
     """Page to view Looker cashbook transaction data"""
     return render_template('looker_data.html', job_id=job_id)
+
+@app.route('/stripe-automation/<int:job_id>')
+def stripe_automation_page(job_id):
+    """Page for Stripe File Automation"""
+    return render_template('stripe_automation.html', job_id=job_id)
 
 @app.route('/api/looker-cashbook-upload/<int:job_id>', methods=['POST'])
 def upload_looker_cashbook_excel(job_id):
@@ -597,6 +620,450 @@ def download_looker_cashbook_excel(job_id):
         
     except Exception as e:
         return jsonify({'error': f'Error creating Excel file: {str(e)}'}), 500
+
+# ==================== STRIPE AUTOMATION API ENDPOINTS ====================
+
+@app.route('/api/stripe-automation/status/<int:job_id>')
+def stripe_automation_status(job_id):
+    """Check if Stripe automation data exists for this job"""
+    try:
+        count = StripeAutomationData.query.filter_by(job_id=job_id).count()
+        return jsonify({
+            'success': True,
+            'has_data': count > 0,
+            'row_count': count
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/upload/<int:job_id>', methods=['POST'])
+def upload_stripe_automation_file(job_id):
+    """Upload Stripe CSV and load to database"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+    
+    try:
+        # Read CSV file
+        import pandas as pd
+        df = pd.read_csv(file)
+        
+        # Clear existing data for this job
+        StripeAutomationData.query.filter_by(job_id=job_id).delete()
+        
+        # Load each row to database
+        row_count = 0
+        for _, row in df.iterrows():
+            row_dict = row.to_dict()
+            # Convert NaN to None for JSON
+            row_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
+            
+            automation_row = StripeAutomationData(
+                job_id=job_id,
+                row_json=json.dumps(row_dict)
+            )
+            db.session.add(automation_row)
+            row_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'File uploaded successfully',
+            'row_count': row_count
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/stripe-automation/data-original/<int:job_id>')
+def get_stripe_automation_data_original(job_id):
+    """Get ORIGINAL Stripe data"""
+    try:
+        rows = StripeAutomationData.query.filter_by(job_id=job_id).all()
+        
+        data_rows = []
+        for row in rows:
+            row_dict = json.loads(row.row_json)
+            data_rows.append(row_dict)
+        
+        return jsonify({
+            'success': True,
+            'rows': data_rows
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/data-processed/<int:job_id>')
+def get_stripe_automation_data_processed(job_id):
+    """Get PROCESSED Stripe data"""
+    try:
+        rows = StripeAutomationProcessed.query.filter_by(job_id=job_id).all()
+        
+        data_rows = []
+        for row in rows:
+            row_dict = json.loads(row.row_json)
+            data_rows.append(row_dict)
+        
+        return jsonify({
+            'success': True,
+            'rows': data_rows
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/download-original/<int:job_id>')
+def download_stripe_automation_original_csv(job_id):
+    """Download ORIGINAL Stripe data as CSV"""
+    import csv
+    from io import StringIO
+    from flask import Response
+    
+    try:
+        rows = StripeAutomationData.query.filter_by(job_id=job_id).all()
+        
+        if not rows:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+        
+        # Parse all rows and get column headers from first row
+        data_rows = []
+        for row in rows:
+            row_dict = json.loads(row.row_json)
+            data_rows.append(row_dict)
+        
+        if not data_rows:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+        
+        # Get headers from first row (maintains original order)
+        headers = list(data_rows[0].keys())
+        
+        # Create CSV in memory
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(data_rows)
+        
+        # Create response
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=stripe_original.csv'}
+        )
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/download/<int:job_id>')
+def download_stripe_automation_csv(job_id):
+    """Download PROCESSED Stripe data as CSV (pfr_deleted.csv)"""
+    import csv
+    from io import StringIO
+    from flask import Response
+    
+    try:
+        # Try processed table first
+        rows = StripeAutomationProcessed.query.filter_by(job_id=job_id).all()
+        
+        if not rows:
+            return jsonify({'success': False, 'error': 'No processed data to download. Run "Fix Payment Failures" first.'}), 404
+        
+        # Parse all rows
+        data_rows = []
+        for row in rows:
+            row_dict = json.loads(row.row_json)
+            data_rows.append(row_dict)
+        
+        if not data_rows:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+        
+        # Build headers as union of all keys, preserving the order from the first row
+        headers = list(data_rows[0].keys())
+        seen = set(headers)
+        for r in data_rows[1:]:
+            for k in r.keys():
+                if k not in seen:
+                    headers.append(k)
+                    seen.add(k)
+        
+        # Create CSV in memory
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=headers, extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(data_rows)
+        
+        # Create response
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=pfr_deleted.csv'}
+        )
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/clear/<int:job_id>', methods=['DELETE'])
+def clear_stripe_automation_data(job_id):
+    """Clear all Stripe automation data for this job (both original and processed)"""
+    try:
+        StripeAutomationProcessed.query.filter_by(job_id=job_id).delete()
+        StripeAutomationData.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Data cleared successfully'
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/fix-payment-failures/<int:job_id>', methods=['POST'])
+def fix_payment_failures(job_id):
+    """Fix Payment Failure Refunds by extracting payment ID and finding matching charge - COPY to processed table"""
+    import re
+    
+    try:
+        # Get original data (read-only)
+        rows = StripeAutomationData.query.filter_by(job_id=job_id).all()
+        
+        # Clear any existing processed data
+        StripeAutomationProcessed.query.filter_by(job_id=job_id).delete()
+        
+        # Build a lookup dictionary for quick ID matching
+        id_lookup = {}
+        for row in rows:
+            data = json.loads(row.row_json)
+            row_id = str(data.get('ID', '')).strip()
+            if row_id:
+                id_lookup[row_id] = {
+                    'row': row,
+                    'data': data
+                }
+        
+        fixed_count = 0
+        not_found_count = 0
+        replacements = []
+        matches = []  # temp store to assign sequential PFR tags
+        refundid_to_paymentid = {}
+        
+        # Pass 1: identify matches and collect info to assign sequential PFR tags
+        for row in rows:
+            data = json.loads(row.row_json)
+            type_val = str(data.get('Type', ''))
+            if 'Payment Failure Refund' in type_val:
+                description = str(data.get('Description', ''))
+                m = re.search(r'(py_[A-Za-z0-9]+)', description)
+                if m:
+                    payment_id = m.group(1)
+                    refund_id = str(data.get('ID', '')).strip()
+                    if payment_id in id_lookup:
+                        matches.append({'refund_id': refund_id, 'charge_id': payment_id})
+                        refundid_to_paymentid[refund_id] = payment_id
+                    else:
+                        not_found_count += 1
+                else:
+                    not_found_count += 1
+
+        # Assign sequential PFR tags
+        charge_tag_map = {}
+        refund_tag_map = {}
+        for idx, m in enumerate(matches, start=1):
+            tag = f'PFR {idx}'
+            charge_tag_map[m['charge_id']] = tag
+            refund_tag_map[m['refund_id']] = tag
+            
+        # Pass 2: copy all rows to processed, applying fixes and PFR tags
+        pfr_fees_total = 0.0
+        for row in rows:
+            data = json.loads(row.row_json)
+            row_id = str(data.get('ID', '')).strip()
+            type_val = str(data.get('Type', ''))
+            
+            if 'Payment Failure Refund' in type_val:
+                # If matched, enrich PRF with customer and client number from original charge
+                payment_id = refundid_to_paymentid.get(row_id)
+                if payment_id and payment_id in id_lookup:
+                    original_data = id_lookup[payment_id]['data']
+                    customer_id = original_data.get('Customer ID', '')
+                    original_desc = str(original_data.get('Description', ''))
+                    client_match = re.match(r'^(\d+):', original_desc)
+                    client_number = client_match.group(1) if client_match else ''
+                    data['Customer ID'] = customer_id
+                    if client_number:
+                        data['phorest_client_id (metadata)'] = client_number
+                        data['0'] = client_number
+                    fixed_count += 1
+                    replacements.append({
+                        'refund_row_id': str(data.get('ID', '')),
+                        'used_reference': payment_id,
+                        'original_charge_id': str(original_data.get('ID', '')),
+                        'set_customer_id': customer_id,
+                        'set_client_number': client_number,
+                        'pfr_tag': refund_tag_map.get(row_id, '')
+                    })
+
+            # Apply PFR tag if this row is part of a matched pair
+            if row_id in refund_tag_map:
+                data['PFR'] = refund_tag_map[row_id]
+            if row_id in charge_tag_map:
+                data['PFR'] = charge_tag_map[row_id]
+
+            # Accumulate COLI fees for PFR-tagged rows (fallback to standard 'Fees' column)
+            if 'PFR' in data and data['PFR']:
+                try:
+                    fee_val = data.get('COLI Fee')
+                    if fee_val is None:
+                        fee_val = data.get('COLI fees')
+                    if fee_val is None:
+                        fee_val = data.get('Fees')
+                    if fee_val is None:
+                        fee_val = data.get('Fee')
+                    pfr_fees_total += float(fee_val or 0)
+                except Exception:
+                    pass
+
+            # Save to PROCESSED table
+            processed_row = StripeAutomationProcessed(
+                job_id=job_id,
+                row_json=json.dumps(data)
+            )
+            db.session.add(processed_row)
+        
+        # Ensure tables exist and persist PFR COLI fees total in state table
+        try:
+            db.create_all()
+        except Exception:
+            pass
+        state = StripeAutomationState.query.filter_by(job_id=job_id).first()
+        if not state:
+            state = StripeAutomationState(job_id=job_id, pfr_coli_fees_total=pfr_fees_total)
+            db.session.add(state)
+        else:
+            state.pfr_coli_fees_total = pfr_fees_total
+
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'fixed_count': fixed_count,
+            'not_found_count': not_found_count,
+            'details': f'Extracted payment IDs and copied all data to processed table',
+            'replacements': replacements,
+            'pfr_coli_fees_total': round(pfr_fees_total, 2)
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/state/<int:job_id>')
+def get_stripe_automation_state(job_id):
+    """Get persisted Stripe automation state for this job"""
+    try:
+        state = StripeAutomationState.query.filter_by(job_id=job_id).first()
+        return jsonify({
+            'success': True,
+            'pfr_coli_fees_total': round(state.pfr_coli_fees_total, 2) if state and state.pfr_coli_fees_total is not None else 0.0
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/stripe-automation/remove-netted/<int:job_id>', methods=['POST'])
+def remove_netted_transactions(job_id):
+    """Remove Payment Failure Refunds and their matching Charges if amounts net to zero - FROM PROCESSED TABLE"""
+    import re
+    
+    try:
+        # Work on PROCESSED table only
+        rows = StripeAutomationProcessed.query.filter_by(job_id=job_id).all()
+        
+        # Build ID lookup
+        id_lookup = {}
+        for row in rows:
+            data = json.loads(row.row_json)
+            row_id = str(data.get('ID', '')).strip()
+            if row_id:
+                id_lookup[row_id] = row
+        
+        rows_to_delete = []
+        removed_count = 0
+        kept_count = 0
+        
+        # Process Payment Failure Refunds
+        for row in rows:
+            data = json.loads(row.row_json)
+            type_val = str(data.get('Type', ''))
+            
+            if 'Payment Failure Refund' in type_val:
+                description = str(data.get('Description', ''))
+                # Compare by Amount for zero-sum detection
+                try:
+                    # Treat PRF amount as negative for netting logic since Stripe CSV may list it positive
+                    refund_amount = -abs(float(data.get('Amount', 0)))
+                except Exception:
+                    refund_amount = 0.0
+                
+                # Extract payment ID
+                match = re.search(r'(py_[A-Za-z0-9]+)', description)
+                
+                if match:
+                    payment_id = match.group(1)
+                    
+                    # Find matching charge
+                    if payment_id in id_lookup:
+                        original_row = id_lookup[payment_id]
+                        original_data = json.loads(original_row.row_json)
+                        try:
+                            original_amount = float(original_data.get('Amount', 0))
+                        except Exception:
+                            original_amount = 0.0
+                        
+                        # Check if AMOUNT values net to zero
+                        amt_sum = original_amount + refund_amount
+                        if abs(amt_sum) < 0.01:  # Within 1 cent tolerance
+                            # Mark both for deletion
+                            if row not in rows_to_delete:
+                                rows_to_delete.append(row)
+                            if original_row not in rows_to_delete:
+                                rows_to_delete.append(original_row)
+                            removed_count += 1
+                        else:
+                            kept_count += 1
+                    else:
+                        kept_count += 1
+                else:
+                    kept_count += 1
+        
+        # Delete marked rows
+        for row in rows_to_delete:
+            db.session.delete(row)
+        
+        db.session.commit()
+        
+        # Get remaining count from PROCESSED table
+        remaining_count = StripeAutomationProcessed.query.filter_by(job_id=job_id).count()
+        
+        return jsonify({
+            'success': True,
+            'removed_count': removed_count,
+            'kept_count': kept_count,
+            'remaining_rows': remaining_count,
+            'details': f'Deleted {len(rows_to_delete)} total rows ({removed_count} pairs) from processed data'
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/stripe-upload/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
 def upload_stripe_csv(job_id, subsidiary_id):
