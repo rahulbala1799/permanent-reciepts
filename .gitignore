@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Local / secrets
+.env
+.env.*
+!.env.example
+
+# Runtime / OS
+.DS_Store
+.app.pid
+app.log
+
+# Generated outputs (keep out of git)
+generated_journals/
+
+# Local snapshots (optional full copy)
+1 Jan 2026 Backup/
+
+# Local data files often dropped in project root
+*.xlsx
+
+# Partner workflow sample CSVs (keep README only if tracked)
+partner/*.csv

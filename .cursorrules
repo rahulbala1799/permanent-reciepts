@@ -1,0 +1,50 @@
+# Permanent Receipts Application Rules
+
+## Port Configuration - HARD RULE
+
+**CRITICAL**: This application MUST run on port 5001. This is a hard requirement.
+
+### Rules:
+1. **Always use port 5001** - The application is configured to run on port 5001 in `app.py` (line 7055: `app.run(debug=True, host='0.0.0.0', port=5001)`)
+2. **Kill existing processes** - Before starting the application, ALWAYS kill any process running on port 5001
+3. **Use Start_App.command** - The `Start_App.command` script handles port cleanup automatically
+
+### Before Making Changes:
+- If you need to restart the application, use the `Start_App.command` script which will:
+  - Kill any existing Flask app on port 5001
+  - Activate the virtual environment
+  - Start the application on port 5001
+
+### Manual Port Cleanup (if needed):
+```bash
+# Kill any process on port 5001
+lsof -ti:5001 | xargs kill -9 2>/dev/null || true
+```
+
+### When Testing Changes:
+1. Stop the running application (Ctrl+C or kill process on port 5001)
+2. Make your code changes
+3. Restart using `./Start_App.command` or `python app.py`
+4. Verify the application is running on port 5001
+
+## Code Change Guidelines
+
+1. **Check entire program** - When making changes, always check the whole program to ensure one change doesn't affect other parts (as per user rule)
+2. **Port consistency** - Never change the port from 5001 without explicit user approval
+3. **Database migrations** - Always create migrations for schema changes
+4. **Test after changes** - Verify the application starts correctly on port 5001 after any changes
+
+## Application Structure
+
+- Main application: `app.py` (runs on port 5001)
+- Start script: `Start_App.command` (handles port cleanup and startup)
+- Configuration: `config.py`
+- Models: `models.py`
+
+## Development Workflow
+
+1. Make code changes
+2. Stop application if running (kill port 5001)
+3. Restart using `./Start_App.command`
+4. Test on `http://localhost:5001`
+5. Verify all features work correctly

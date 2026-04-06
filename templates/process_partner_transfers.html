@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process Partner Transfers - USA | Receipts Automation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">Receipts Automation</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{{ url_for('index') }}">Dashboard</a>
+                <a class="nav-link" href="{{ url_for('receipts_page') }}">Reconciliation Jobs</a>
+                <a class="nav-link" href="/reconciliation/{{ job_id }}/{{ subsidiary_id }}">Back to Subsidiary Reconciliation</a>
+                <a class="nav-link active" href="#">Process Partner Transfers</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h1><i class="fas fa-exchange-alt text-primary"></i> Process Partner Transfers</h1>
+                <p class="lead">USA subsidiary – upload Partner file, view data if needed, then Process to generate Transfer In and Transfer Out CSVs.</p>
+            </div>
+        </div>
+
+        <!-- Status -->
+        <div class="row mt-3">
+            <div class="col-md-12">
+                <div class="alert alert-secondary mb-0" id="status-bar">
+                    <span id="status-uploaded">0 rows uploaded</span>
+                    <span class="mx-2">|</span>
+                    <span id="status-transferin">Transfer In: 0 rows</span>
+                    <span class="mx-2">|</span>
+                    <span id="status-transferout">Transfer Out: 0 rows</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-tasks"></i> Steps</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="file" id="partner-file" accept=".xlsx,.xls" class="d-none">
+                            <button type="button" class="btn btn-warning" id="btn-upload">
+                                <i class="fas fa-upload"></i> Upload Partner Transfer Files
+                            </button>
+                            <button type="button" class="btn btn-info" id="btn-view" disabled>
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button type="button" class="btn btn-success" id="btn-process" disabled>
+                                <i class="fas fa-play"></i> Process
+                            </button>
+                            <a class="btn btn-outline-primary" id="btn-dl-transferin" href="#" style="display: none;" download>
+                                <i class="fas fa-download"></i> Download Transfer In CSV
+                            </a>
+                            <a class="btn btn-outline-primary" id="btn-dl-transferout" href="#" style="display: none;" download>
+                                <i class="fas fa-download"></i> Download Transfer Out CSV
+                            </a>
+                            <button type="button" class="btn btn-outline-danger" id="btn-clear" title="Delete uploaded and processed data so you can re-upload and re-process">
+                                <i class="fas fa-trash-alt"></i> Delete data
+                            </button>
+                        </div>
+                        <p class="text-muted small mt-3 mb-0">
+                            Upload the Partner Excel file (e.g. Partner.xlsx). You can View the uploaded data, or go straight to Process. After Process, download the two CSVs in the required format.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- View data table (collapsible) -->
+        <div class="row mt-4" id="view-section" style="display: none;">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-table"></i> Uploaded Partner Transfer Data</h5>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-close-view">
+                            <i class="fas fa-times"></i> Close
+                        </button>
+                    </div>
+                    <div class="card-body overflow-auto">
+                        <table class="table table-sm table-striped table-hover" id="view-table">
+                            <thead id="view-thead"></thead>
+                            <tbody id="view-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const jobId = {{ job_id }};
+        const subsidiaryId = {{ subsidiary_id }};
+
+        function api(path, options = {}) {
+            const url = `/api/partner-transfer${path}`;
+            return fetch(url, { ...options, headers: options.headers || {} });
+        }
+
+        function loadStatus() {
+            api(`/status/${jobId}/${subsidiaryId}`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('status-uploaded').textContent = data.uploaded + ' rows uploaded';
+                    document.getElementById('status-transferin').textContent = 'Transfer In: ' + data.transfer_in + ' rows';
+                    document.getElementById('status-transferout').textContent = 'Transfer Out: ' + data.transfer_out + ' rows';
+                    document.getElementById('btn-view').disabled = data.uploaded === 0;
+                    document.getElementById('btn-process').disabled = data.uploaded === 0;
+                    if (data.transfer_in > 0 || data.transfer_out > 0) {
+                        document.getElementById('btn-dl-transferin').style.display = 'inline-block';
+                        document.getElementById('btn-dl-transferin').href = `/api/partner-transfer/download-transferin/${jobId}/${subsidiaryId}`;
+                        document.getElementById('btn-dl-transferout').style.display = 'inline-block';
+                        document.getElementById('btn-dl-transferout').href = `/api/partner-transfer/download-transferout/${jobId}/${subsidiaryId}`;
+                    } else {
+                        document.getElementById('btn-dl-transferin').style.display = 'none';
+                        document.getElementById('btn-dl-transferout').style.display = 'none';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        document.getElementById('partner-file').addEventListener('change', function() {
+            const file = this.files[0];
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            const btn = document.getElementById('btn-upload');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            fetch(`/api/partner-transfer/upload/${jobId}/${subsidiaryId}`, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        loadStatus();
+                        alert('Uploaded ' + data.rows + ' rows.');
+                    } else {
+                        alert('Error: ' + (data.error || 'Upload failed'));
+                    }
+                })
+                .catch(e => alert('Error: ' + e.message))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-upload"></i> Upload Partner Transfer Files';
+                    document.getElementById('partner-file').value = '';
+                });
+        });
+
+        document.getElementById('btn-upload').addEventListener('click', function() {
+            document.getElementById('partner-file').click();
+        });
+
+        document.getElementById('btn-view').addEventListener('click', function() {
+            api(`/view/${jobId}/${subsidiaryId}`)
+                .then(r => r.json())
+                .then(rows => {
+                    if (rows.length === 0) {
+                        document.getElementById('view-section').style.display = 'none';
+                        return;
+                    }
+                    const thead = document.getElementById('view-thead');
+                    const tbody = document.getElementById('view-tbody');
+                    const cols = ['payment_date','client_id','invoice_number','billing_entity','ar_account','currency','exchange_rate','amount','account','location','transtype','comment','card_reference','reasoncode','sepaprovider','invoice_ref','payment_ref','memo','in_stripe_can'];
+                    thead.innerHTML = '<tr>' + cols.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+                    tbody.innerHTML = rows.map(r => 
+                        '<tr><td>' + (r.payment_date || '') + '</td><td>' + (r.client_id ?? '') + '</td><td>' + (r.invoice_number || '') + '</td><td>' + (r.billing_entity || '') + '</td><td>' + (r.ar_account || '') + '</td><td>' + (r.currency || '') + '</td><td>' + (r.exchange_rate ?? '') + '</td><td>' + (r.amount ?? '') + '</td><td>' + (r.account || '') + '</td><td>' + (r.location || '') + '</td><td>' + (r.transtype || '') + '</td><td>' + (r.comment || '') + '</td><td>' + (r.card_reference || '') + '</td><td>' + (r.reasoncode ?? '') + '</td><td>' + (r.sepaprovider ?? '') + '</td><td>' + (r.invoice_ref || '') + '</td><td>' + (r.payment_ref || '') + '</td><td>' + (r.memo || '') + '</td><td>' + (r.in_stripe_can || '') + '</td></tr>'
+                    ).join('');
+                    document.getElementById('view-section').style.display = 'block';
+                })
+                .catch(e => alert('Error: ' + e.message));
+        });
+
+        document.getElementById('btn-close-view').addEventListener('click', function() {
+            document.getElementById('view-section').style.display = 'none';
+        });
+
+        document.getElementById('btn-clear').addEventListener('click', function() {
+            if (!confirm('Delete all uploaded and processed partner transfer data for this job? You can then re-upload and re-process.')) return;
+            const btn = document.getElementById('btn-clear');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+            fetch(`/api/partner-transfer/clear/${jobId}/${subsidiaryId}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('view-section').style.display = 'none';
+                        loadStatus();
+                        alert('Data deleted. You can re-upload and re-process.');
+                    } else {
+                        alert('Error: ' + (data.error || 'Delete failed'));
+                    }
+                })
+                .catch(e => alert('Error: ' + e.message))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-trash-alt"></i> Delete data';
+                });
+        });
+
+        document.getElementById('btn-process').addEventListener('click', function() {
+            const btn = document.getElementById('btn-process');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            fetch(`/api/partner-transfer/process/${jobId}/${subsidiaryId}`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        loadStatus();
+                        alert('Process complete. Transfer In: ' + data.transfer_in_rows + ' rows. Transfer Out: ' + data.transfer_out_rows + ' rows. You can download the CSVs now.');
+                    } else {
+                        alert('Error: ' + (data.error || 'Process failed'));
+                    }
+                })
+                .catch(e => alert('Error: ' + e.message))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-play"></i> Process';
+                });
+        });
+
+        document.addEventListener('DOMContentLoaded', loadStatus);
+    </script>
+</body>
+</html>

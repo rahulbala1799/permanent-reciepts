@@ -15,6 +15,20 @@ from typing import Dict, List, Optional, Tuple
 import io
 
 
+def _cashbook_location_for_region(row: pd.Series) -> str:
+    """EU master uses 'Location'; generic builder uses 'location'. Empty if missing."""
+    for key in ('Location', 'location'):
+        if key not in row.index:
+            continue
+        v = row[key]
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ''
+
+
 class JournalBuilder:
     """
     Main class for building journals from reconciliation data
@@ -471,7 +485,7 @@ class JournalBuilder:
                 'Management P&L': 'Balance Sheet',
                 'Dept.': 'Balance Sheet',
                 'Cost centre': 'Balance Sheet',
-                'Region': self.subsidiary_name,
+                'Region': _cashbook_location_for_region(row),
                 'Dr': amount_abs,
                 'Cr': ''
             }
@@ -487,7 +501,7 @@ class JournalBuilder:
             'Management P&L': 'Balance Sheet',
             'Dept.': 'Balance Sheet',
             'Cost centre': 'Balance Sheet',
-            'Region': self.subsidiary_name,
+            'Region': '',
             'Dr': '',
             'Cr': total_refund_amount
         }

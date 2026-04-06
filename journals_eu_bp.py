@@ -386,7 +386,7 @@ def generate_journals(job_id):
                 # Fix account for Germany billing entities (applies to ALL journals)
                 billing_entity = row_dict.get('billing_entity', '')
                 if 'Phorest Germany' in billing_entity:
-                    row_dict['account'] = '10010c Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c Ä # 17013705 (Germany)'
+                    row_dict['account'] = '10010c Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c \u00C4 # 17013705 (Germany)'  # Ä = U+00C4
                 # Add more country mappings here if needed
                 
                 # Save to FPProcessedJournalEU
@@ -434,11 +434,11 @@ def generate_journals(job_id):
                     # Set account (bank) based on ORIGINAL billing entity and currency
                     # Using EXACT strings from uploaded data with correct special characters
                     if 'Germany' in original_billing_entity:
-                        client_row['account'] = '10010c Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c Ä # 17013705 (Germany)'
+                        client_row['account'] = '10010c Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c \u00C4 # 17013705 (Germany)'  # Ä = U+00C4
                     elif client_row.get('currency') == 'USD':
                         client_row['account'] = '10040a Bank : Dummy Interco Bank Accounts : Interco - SVB current a/c # 5468 & CIBC # 5090'
                     elif client_row.get('currency') == 'GBP':
-                        client_row['account'] = '10020a Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c ¬£ # 62100285'
+                        client_row['account'] = '10020a Bank : Dummy Interco Bank Accounts : Interco - BOI current a/c \u00A3 # 62100285'  # £ = U+00A3
                     # Add more country mappings if needed (Austria, France, etc.)
                     # Keep original account if no specific mapping
                     
@@ -548,8 +548,8 @@ def download_journal(job_id, journal_type):
             'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
         ]
         
-        # Write CSV with EXACT expected format
-        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        # Write CSV with cp1252 so Ä, £ etc. display correctly in Excel/NetSuite (EU only)
+        with open(filepath, 'w', newline='', encoding='cp1252', errors='replace') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers, extrasaction='ignore')
             writer.writeheader()
             
@@ -711,8 +711,8 @@ def download_all_journals(job_id):
                             print(f"Error writing row: {e}")
                             continue
                 
-                # Add CSV to ZIP
-                csv_bytes = csv_content.getvalue().encode('utf-8')
+                # Add CSV to ZIP – use cp1252 so Ä, £ etc. display correctly in Excel/NetSuite (EU only)
+                csv_bytes = csv_content.getvalue().encode('cp1252', errors='replace')
                 zf.writestr(f"{jtype}.csv", csv_bytes)
         
         memory_file.seek(0)
@@ -954,6 +954,131 @@ def api_match_results(job_id, subsidiary_id):
                 'unmatched_total': unmatched_total
             }
         })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== CROSS-SUBSIDIARY SPLITTER ====================
+
+@journals_eu_bp.route('/api/split-cross-sub/<int:job_id>', methods=['POST'])
+def split_cross_subsidiary(job_id):
+    """Split Cross-Subsidiary CSV into Main, POA, and Refunds"""
+    import pandas as pd
+    import os
+    from datetime import datetime
+    import traceback
+    
+    try:
+        print(f"[DEBUG] Split Cross-Sub called for job_id={job_id}")
+        if 'file' not in request.files:
+            print("[DEBUG] No file in request")
+            return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        print(f"[DEBUG] File received: {file.filename}")
+        if not file.filename.endswith('.csv'):
+            return jsonify({'success': False, 'error': 'Only CSV files are supported'}), 400
+        
+        # Read CSV with proper encoding handling
+        print("[DEBUG] Reading CSV...")
+        df = pd.read_csv(file, encoding='cp1252')  # Windows-1252 encoding for NetSuite compatibility
+        print(f"[DEBUG] CSV read successfully, shape: {df.shape}")
+        
+        # Split logic:
+        # - Refunds: amount < 0
+        # - POA: invoice_number contains "POA" (case insensitive)
+        # - Main: everything else
+        
+        refunds = df[df['amount'].astype(float) < 0].copy()
+        poa = df[(df['amount'].astype(float) >= 0) & (df['invoice_number'].astype(str).str.contains('POA', case=False, na=False))].copy()
+        main = df[(df['amount'].astype(float) >= 0) & (~df['invoice_number'].astype(str).str.contains('POA', case=False, na=False))].copy()
+        
+        # Save to temp directory
+        output_dir = f"generated_journals/cross_sub_splits/job_{job_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        main_path = os.path.join(output_dir, f"Cross_Subsidiary_Main_{timestamp}.csv")
+        poa_path = os.path.join(output_dir, f"Cross_Subsidiary_POA_{timestamp}.csv")
+        refunds_path = os.path.join(output_dir, f"Cross_Subsidiary_Refunds_{timestamp}.csv")
+        
+        # Write with Windows-1252 encoding for NetSuite compatibility
+        main.to_csv(main_path, index=False, encoding='cp1252')
+        poa.to_csv(poa_path, index=False, encoding='cp1252')
+        refunds.to_csv(refunds_path, index=False, encoding='cp1252')
+        
+        return jsonify({
+            'success': True,
+            'files': [
+                {'type': 'Main', 'count': len(main), 'path': main_path},
+                {'type': 'POA', 'count': len(poa), 'path': poa_path},
+                {'type': 'Refunds', 'count': len(refunds), 'path': refunds_path}
+            ]
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Split Cross-Sub failed: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@journals_eu_bp.route('/api/download-cross-sub-split/<int:job_id>/<split_type>')
+def download_cross_sub_split(job_id, split_type):
+    """Download a specific split file"""
+    import glob
+    import os
+    from flask import send_file
+    
+    try:
+        output_dir = f"generated_journals/cross_sub_splits/job_{job_id}"
+        pattern = os.path.join(output_dir, f"Cross_Subsidiary_{split_type}_*.csv")
+        files = glob.glob(pattern)
+        
+        if not files:
+            return jsonify({'success': False, 'error': f'No {split_type} file found'}), 404
+        
+        # Get the most recent file
+        latest_file = max(files, key=os.path.getctime)
+        
+        return send_file(latest_file, as_attachment=True, download_name=os.path.basename(latest_file))
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@journals_eu_bp.route('/api/download-cross-sub-splits-zip/<int:job_id>')
+def download_cross_sub_splits_zip(job_id):
+    """Download all split files as ZIP"""
+    import glob
+    import os
+    import zipfile
+    import io
+    from flask import send_file
+    from datetime import datetime
+    
+    try:
+        output_dir = f"generated_journals/cross_sub_splits/job_{job_id}"
+        
+        # Find all CSV files in the directory
+        csv_files = glob.glob(os.path.join(output_dir, "*.csv"))
+        
+        if not csv_files:
+            return jsonify({'success': False, 'error': 'No split files found'}), 404
+        
+        # Create ZIP in memory
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for csv_file in csv_files:
+                zf.write(csv_file, os.path.basename(csv_file))
+        
+        memory_file.seek(0)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'Cross_Subsidiary_Splits_{timestamp}.zip'
+        )
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

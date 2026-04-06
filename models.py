@@ -660,8 +660,155 @@ def create_models(db):
         pfr_coli_fees_total = Column(Float, nullable=True)
         updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # ==================== MANUAL PAYMENT AUTOMATION TABLES ====================
+    class ManualPaymentOriginalCashbook(db.Model):
+        __tablename__ = 'manual_payment_original_cashbook'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)  # store full row as JSON
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class ManualPaymentOriginalBank(db.Model):
+        __tablename__ = 'manual_payment_original_bank'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class ManualPaymentProcessedCashbook(db.Model):
+        __tablename__ = 'manual_payment_processed_cashbook'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class ManualPaymentProcessedBank(db.Model):
+        __tablename__ = 'manual_payment_processed_bank'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class ManualPaymentState(db.Model):
+        __tablename__ = 'manual_payment_state'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False, unique=True)
+        last_run_at = Column(DateTime, nullable=True)
+        cashbook_count = Column(Integer, default=0)
+        bank_count = Column(Integer, default=0)
+        matched_count = Column(Integer, default=0)
+        unmatched_bank_count = Column(Integer, default=0)
+        totals_json = Column(Text, nullable=True)  # aggregate totals, JSON
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    class BacsReviewOriginal(db.Model):
+        __tablename__ = 'bacs_review_original'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)  # store full row as JSON
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class BacsReviewProcessed(db.Model):
+        __tablename__ = 'bacs_review_processed'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        row_json = Column(Text, nullable=False)  # store full row as JSON
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    class BacsReviewState(db.Model):
+        __tablename__ = 'bacs_review_state'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        last_run_at = Column(DateTime, nullable=True)
+        original_count = Column(Integer, default=0)
+        processed_count = Column(Integer, default=0)
+        removed_pairs_count = Column(Integer, default=0)
+        unmatched_rejects_count = Column(Integer, default=0)
+        unmatched_rejects_json = Column(Text, nullable=True)  # JSON array of unmatched reject details
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Process Partner Transfers (USA): raw upload
+    class PartnerTransfer(db.Model):
+        __tablename__ = 'partner_transfer'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        payment_date = Column(DateTime, nullable=True)
+        client_id = Column(Integer, nullable=True)
+        invoice_number = Column(String(255), nullable=True)
+        billing_entity = Column(String(255), nullable=True)
+        ar_account = Column(String(255), nullable=True)
+        currency = Column(String(20), nullable=True)
+        exchange_rate = Column(Float, nullable=True)
+        amount = Column(Numeric(15, 2), nullable=True)
+        account = Column(String(255), nullable=True)
+        location = Column(String(255), nullable=True)
+        transtype = Column(String(100), nullable=True)
+        comment = Column(Text, nullable=True)
+        card_reference = Column(String(50), nullable=True)
+        reasoncode = Column(Float, nullable=True)
+        sepaprovider = Column(Float, nullable=True)
+        invoice_ref = Column(String(255), nullable=True)
+        payment_ref = Column(String(255), nullable=True)
+        memo = Column(String(255), nullable=True)
+        in_stripe_can = Column(String(100), nullable=True)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Process Partner Transfers: output 1 – Transfer In (positive amounts only)
+    class PartnerTransferIn(db.Model):
+        __tablename__ = 'partner_transfer_in'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        payment_date = Column(DateTime, nullable=True)
+        client_id = Column(Integer, nullable=True)
+        invoice_number = Column(String(255), nullable=True)
+        billing_entity = Column(String(255), nullable=True)
+        ar_account = Column(String(255), nullable=True)
+        currency = Column(String(20), nullable=True)
+        exchange_rate = Column(Float, nullable=True)
+        amount = Column(Numeric(15, 2), nullable=True)
+        account = Column(String(255), nullable=True)
+        location = Column(String(255), nullable=True)
+        transtype = Column(String(100), nullable=True)
+        comment = Column(Text, nullable=True)
+        card_reference = Column(String(50), nullable=True)
+        reasoncode = Column(Float, nullable=True)
+        sepaprovider = Column(Float, nullable=True)
+        invoice_ref = Column(String(255), nullable=True)
+        payment_ref = Column(String(255), nullable=True)
+        memo = Column(String(255), nullable=True)
+        in_stripe_can = Column(String(100), nullable=True)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Process Partner Transfers: output 2 – Transfer Out (journal Dr/Cr rows)
+    class PartnerTransferOut(db.Model):
+        __tablename__ = 'partner_transfer_out'
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False)
+        subsidiary_id = Column(Integer, nullable=False)
+        date = Column(DateTime, nullable=True)
+        memo = Column(String(255), nullable=True)
+        entity = Column(String(255), nullable=True)
+        name = Column(String(100), nullable=True)  # partner/client id
+        account = Column(String(255), nullable=True)
+        management_pl = Column(String(255), nullable=True)
+        dept = Column(String(255), nullable=True)
+        cost_centre = Column(String(255), nullable=True)
+        region = Column(String(255), nullable=True)
+        dr = Column(Numeric(15, 2), nullable=True)
+        cr = Column(Numeric(15, 2), nullable=True)
+        created_at = Column(DateTime, default=datetime.utcnow)
+
     return (Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction,
             LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction,
             FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult,
             FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU,
-            StripeAutomationData, StripeAutomationProcessed, StripeAutomationState)
+            StripeAutomationData, StripeAutomationProcessed, StripeAutomationState,
+            ManualPaymentOriginalCashbook, ManualPaymentOriginalBank,
+            ManualPaymentProcessedCashbook, ManualPaymentProcessedBank, ManualPaymentState,
+            BacsReviewOriginal, BacsReviewProcessed, BacsReviewState,
+            PartnerTransfer, PartnerTransferIn, PartnerTransferOut)

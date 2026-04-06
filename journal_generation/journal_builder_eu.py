@@ -10,6 +10,20 @@ from datetime import datetime
 import calendar
 
 
+def _cashbook_location_for_region(row: pd.Series) -> str:
+    """EU master uses 'Location'; generic builder uses 'location'. Empty if missing."""
+    for key in ('Location', 'location'):
+        if key not in row.index:
+            continue
+        v = row[key]
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ''
+
+
 class JournalBuilderEU:
     """
     EU-specific journal builder that handles AED transactions separately
@@ -66,7 +80,7 @@ class JournalBuilderEU:
                 'exchange_rate': match.cb_exchange_rate,
                 'amount': match.stripe_amount,  # Use stripe_amount (same as reconciliation)
                 'account': match.cb_account,
-                'location': match.cb_location,
+                'Location': (match.cb_location or ''),  # Capital L to match export expected_columns
                 'transtype': match.cb_transtype,
                 'comment': match.cb_comment,
                 'card_reference': match.cb_card_reference,
@@ -189,59 +203,83 @@ class JournalBuilderEU:
     
     def _generate_refunds_journal(self, refunds_df: pd.DataFrame, memo: Optional[str] = None) -> pd.DataFrame:
         """
-        Generate double-entry refunds journal
-        Each refund creates 2 lines: Debit (AR) and Credit (Bank)
+        Generate double-entry refunds journal in same format as other subsidiaries.
+        One Dr row per refund (AR), then one Cr row for total (Bank). Same columns as USA/UK/etc.
         """
         if refunds_df.empty:
             return pd.DataFrame()
         
-        # Get current month and year
-        now = datetime.now()
-        month_name = calendar.month_name[now.month]
-        year = now.year
+        journal_entries = []
         
-        # Default memo if not provided
-        if not memo:
-            memo = f"{month_name} {year} Receipts"
+        # Get the month and year from the first transaction to calculate EOM (same as other subsidiaries)
+        if not refunds_df.empty and 'payment_date' in refunds_df.columns:
+            first_date_str = str(refunds_df.iloc[0]['payment_date'])
+            try:
+                if '/' in first_date_str:
+                    parts = first_date_str.split('/')
+                    if len(parts) == 3:
+                        day, month, year = parts
+                        month = int(month)
+                        year = int(year)
+                        last_day = calendar.monthrange(year, month)[1]
+                        eom_date = f"{last_day:02d}/{month:02d}/{year}"
+                    else:
+                        eom_date = "30/09/2025"
+                else:
+                    first_date = datetime.strptime(first_date_str[:10], '%Y-%m-%d')
+                    month = first_date.month
+                    year = first_date.year
+                    last_day = calendar.monthrange(year, month)[1]
+                    eom_date = f"{last_day:02d}/{month:02d}/{year}"
+            except Exception:
+                eom_date = "30/09/2025"
+        else:
+            eom_date = "30/09/2025"
         
-        refund_entries = []
+        total_refund_amount = abs(refunds_df['amount'].sum())
+        first_refund = refunds_df.iloc[0]
+        billing_entity = first_refund['billing_entity']
+        bank_account = first_refund['account']
         
-        for _, refund in refunds_df.iterrows():
-            amount = abs(refund['amount'])  # Make positive for display
-            
-            # Debit entry (AR)
-            debit_entry = {
-                'Date': refund['payment_date'],
-                'Account': refund['ar_account'],
-                'Dr': amount,
-                'Cr': '',
-                'Billing Entity': refund['billing_entity'],
-                'Memo': memo,
-                'Currency': refund['currency'],
-                'Exchange Rate': refund['exchange_rate'],
-                'Location': refund['location'],
-                'Client #': refund['client_id'],
-                'Invoice #': refund['invoice_number']
+        # One Dr entry per refund (same as other subsidiaries)
+        for idx, row in refunds_df.iterrows():
+            amount_abs = abs(row['amount'])
+            entry = {
+                'Date': row['payment_date'],
+                'memo': memo if memo else 'MISC PAYMENT STRIPE',
+                'Entity': billing_entity,
+                'Name': row['client_id'],
+                'Account': '11010 Accounts Receivable : Trade Debtors',
+                'Management P&L': 'Balance Sheet',
+                'Dept.': 'Balance Sheet',
+                'Cost centre': 'Balance Sheet',
+                'Region': _cashbook_location_for_region(row),
+                'Dr': amount_abs,
+                'Cr': ''
             }
-            refund_entries.append(debit_entry)
-            
-            # Credit entry (Bank)
-            credit_entry = {
-                'Date': refund['payment_date'],
-                'Account': refund['account'],
-                'Dr': '',
-                'Cr': amount,
-                'Billing Entity': refund['billing_entity'],
-                'Memo': memo,
-                'Currency': refund['currency'],
-                'Exchange Rate': refund['exchange_rate'],
-                'Location': refund['location'],
-                'Client #': refund['client_id'],
-                'Invoice #': refund['invoice_number']
-            }
-            refund_entries.append(credit_entry)
+            journal_entries.append(entry)
         
-        return pd.DataFrame(refund_entries)
+        # Final Cr entry - Bank Account (total sum), same as other subsidiaries
+        entry_cr = {
+            'Date': eom_date,
+            'memo': 'Refunds / Disputes',
+            'Entity': billing_entity,
+            'Name': '',
+            'Account': bank_account,
+            'Management P&L': 'Balance Sheet',
+            'Dept.': 'Balance Sheet',
+            'Cost centre': 'Balance Sheet',
+            'Region': '',
+            'Dr': '',
+            'Cr': total_refund_amount
+        }
+        journal_entries.append(entry_cr)
+        
+        refunds_journal_df = pd.DataFrame(journal_entries, columns=[
+            'Date', 'memo', 'Entity', 'Name', 'Account',
+            'Management P&L', 'Dept.', 'Cost centre', 'Region', 'Dr', 'Cr'
+        ])
+        return refunds_journal_df
     
     def generate_all(self, memo: Optional[str] = None) -> Dict:
         """
@@ -356,15 +394,27 @@ class JournalBuilderEU:
         """Export journal DataFrame to CSV BytesIO with correct format"""
         output = io.BytesIO()
         
-        # Define the EXACT column order expected (matches USA/Canada format)
+        # Create a copy to avoid modifying original
+        df_export = df.copy()
+        
+        # Refunds journals use Dr/Cr format with different columns – export as-is
+        if 'Dr' in df_export.columns and 'Cr' in df_export.columns:
+            df_export.to_csv(output, index=False, encoding='utf-8')
+            output.seek(0)
+            return output
+        
+        # Standard journals (Main, POA, Cross): use expected column order and preserve Location
         expected_columns = [
             'payment_date', 'client_id', 'invoice_number', 'billing_entity', 'ar_account',
             'currency', 'exchange_rate', 'amount', 'account', 'Location', 'transtype',
             'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
         ]
         
-        # Create a copy to avoid modifying original
-        df_export = df.copy()
+        # Preserve Location: use 'Location' if present, else copy from 'location' (EU column naming)
+        if 'Location' not in df_export.columns and 'location' in df_export.columns:
+            df_export['Location'] = df_export['location'].fillna('').astype(str)
+        elif 'Location' in df_export.columns:
+            df_export['Location'] = df_export['Location'].fillna('').astype(str)
         
         # Generate invoice # and payment # for ALL rows
         if 'client_id' in df_export.columns and 'invoice_number' in df_export.columns:
@@ -394,7 +444,7 @@ class JournalBuilderEU:
     
     def export_all_journals(self, memo: Optional[str] = None) -> Dict[str, io.BytesIO]:
         """
-        Export all EU journals as CSV files
+        Export all EU journals as CSV files (including master file, same as other subsidiaries)
         
         Returns:
             Dictionary with journal name as key and BytesIO CSV file as value
@@ -405,6 +455,9 @@ class JournalBuilderEU:
             return {}
         
         journals = self.split_journals(master_df, memo)
+        
+        # Include master journal in ZIP (same as USA/other subsidiaries)
+        journals['Master_Journal'] = master_df
         
         # Export each journal as CSV
         exported_journals = {}

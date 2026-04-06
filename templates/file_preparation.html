@@ -95,7 +95,7 @@
                             </div>
                         </div>
                         
-                        <!-- New Row for Stripe File Automation -->
+                        <!-- New Row for Automations -->
                         <div class="row mt-3">
                             <div class="col-md-4">
                                 <div class="card h-100 preparation-process" onclick="openStripeAutomation()">
@@ -106,6 +106,20 @@
                                         <div class="mt-auto">
                                             <button class="btn btn-outline-info">
                                                 <i class="fas fa-robot"></i> Start Automation
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card h-100 preparation-process" onclick="openManualPaymentAutomation()">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-hand-holding-usd fa-3x text-secondary mb-3"></i>
+                                        <h5 class="card-title">Manual Payment Automation</h5>
+                                        <p class="card-text">Workspace for manual payment reconciliation workflows</p>
+                                        <div class="mt-auto">
+                                            <button class="btn btn-outline-secondary">
+                                                <i class="fas fa-tools"></i> Open Workspace
                                             </button>
                                         </div>
                                     </div>
@@ -664,6 +678,11 @@
         function openStripeAutomation() {
             // Navigate to Stripe File Automation page
             window.location.href = `/stripe-automation/${jobId}`;
+        }
+
+        function openManualPaymentAutomation() {
+            // Navigate to Manual Payment Automation page
+            window.location.href = `/manual-payment-automation/${jobId}`;
         }
 
         function openCustomMapping() {

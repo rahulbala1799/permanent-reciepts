@@ -410,6 +410,19 @@
             </div>
         </div>
         
+        <!-- Cross-Subsidiary Splitter -->
+        <div class="section">
+            <h2>📂 Cross-Subsidiary Journal Splitter</h2>
+            <p style="margin-bottom: 15px; color: #666;">Upload your Cross-Subsidiary journal to split it into Main, POA, and Refunds</p>
+            
+            <div style="margin-bottom: 15px;">
+                <input type="file" id="cross-sub-file" accept=".csv" style="margin-right: 10px;">
+                <button class="button" onclick="uploadCrossSubFile()">Upload & Split</button>
+            </div>
+            
+            <div id="cross-sub-results" class="hidden"></div>
+        </div>
+        
         <!-- Step 2: Generate Journals -->
         <div class="section">
             <h2>Step 2: Generate Split Journals</h2>
@@ -1198,6 +1211,64 @@
             } catch (error) {
                 showAlert('error', `Clear failed: ${error.message}`);
             }
+        }
+
+        // ==================== CROSS-SUBSIDIARY SPLITTER ====================
+        async function uploadCrossSubFile() {
+            const fileInput = document.getElementById('cross-sub-file');
+            const file = fileInput.files[0];
+            if (!file) {
+                showAlert('error', 'Please select a CSV file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                showAlert('info', 'Uploading and splitting Cross-Subsidiary file...');
+                const response = await fetch(`/journals-eu/api/split-cross-sub/${JOB_ID}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showAlert('success', `Split complete! Generated ${result.files.length} files`);
+                    displayCrossSubResults(result);
+                } else {
+                    showAlert('error', result.error || 'Split failed');
+                }
+            } catch (error) {
+                showAlert('error', `Error: ${error.message}`);
+            }
+        }
+
+        function displayCrossSubResults(result) {
+            const container = document.getElementById('cross-sub-results');
+            container.classList.remove('hidden');
+            
+            let html = '<h3>Split Results</h3><div class="stats-grid">';
+            result.files.forEach(f => {
+                html += `
+                    <div class="stat-card">
+                        <div class="stat-value">${f.count}</div>
+                        <div class="stat-label">${f.type}</div>
+                        <button class="button" onclick="downloadCrossSubSplit('${f.type}')">Download</button>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            html += `<button class="button" onclick="downloadAllCrossSubSplits()" style="margin-top:20px;">Download All as ZIP</button>`;
+            container.innerHTML = html;
+        }
+
+        function downloadCrossSubSplit(splitType) {
+            window.location.href = `/journals-eu/api/download-cross-sub-split/${JOB_ID}/${splitType}`;
+        }
+
+        function downloadAllCrossSubSplits() {
+            window.location.href = `/journals-eu/api/download-cross-sub-splits-zip/${JOB_ID}`;
         }
     </script>
 </body>

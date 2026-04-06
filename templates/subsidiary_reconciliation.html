@@ -54,6 +54,12 @@
                         <button class="btn btn-primary" onclick="startReconciliation()">
                             <i class="fas fa-play"></i> Start Reconciliation
                         </button>
+                        <button class="btn btn-info" onclick="openBacsReview()" id="bacs-review-btn" style="display: none;">
+                            <i class="fas fa-file-excel"></i> Bacs Review
+                        </button>
+                        <a class="btn btn-dark" href="/process-partner-transfers/{{ job_id }}/{{ subsidiary_id }}" id="process-partner-transfers-btn" style="display: none;">
+                            <i class="fas fa-exchange-alt"></i> Process Partner Transfers
+                        </a>
                     </div>
                 </div>
             </div>
@@ -340,6 +346,15 @@
                         document.getElementById('subsidiary-export-name').textContent = subsidiary.name;
                         document.getElementById('upload-subsidiary-name').textContent = subsidiary.name;
                         document.getElementById('page-title').textContent = `${subsidiary.name} Reconciliation - Receipts Automation`;
+                        
+                        // Show Bacs Review button only for UK (subsidiary_id = 5)
+                        if (subsidiaryId === 5) {
+                            document.getElementById('bacs-review-btn').style.display = 'inline-block';
+                        }
+                        // Show Process Partner Transfers only for USA (subsidiary_id = 3)
+                        if (subsidiaryId === 3) {
+                            document.getElementById('process-partner-transfers-btn').style.display = 'inline-block';
+                        }
                     }
                 })
                 .catch(error => {
@@ -633,6 +648,11 @@
 
         function exportSummary() {
             alert('Exporting summary report...');
+        }
+
+        function openBacsReview() {
+            // Navigate to Bacs Review page
+            window.location.href = `/bacs-review/${jobId}/${subsidiaryId}`;
         }
     </script>
 </body>

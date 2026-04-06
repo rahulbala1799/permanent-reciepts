@@ -26,7 +26,42 @@ migrate.init_app(app, db)
 
 # Import and create models after db is initialized
 from models import create_models
-Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction, LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction, FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult, FPDatasetEU, FPJournalRowEU, FPSummitInstallmentEU, FPMatchResultEU, FPProcessedJournalEU, StripeAutomationData, StripeAutomationProcessed, StripeAutomationState = create_models(db)
+(
+    Receipt,
+    ProcessingJob,
+    Subsidiary,
+    StripeTransaction,
+    CashbookTransaction,
+    LookerCashbookTransaction,
+    MatchedTransaction,
+    ReconciliationResults,
+    JournalTransaction,
+    FPDataset,
+    FPJournalRow,
+    FPWorkingRow,
+    FPSummitInstallment,
+    FPProcessedJournal,
+    FPMatchResult,
+    FPDatasetEU,
+    FPJournalRowEU,
+    FPSummitInstallmentEU,
+    FPMatchResultEU,
+    FPProcessedJournalEU,
+    StripeAutomationData,
+    StripeAutomationProcessed,
+    StripeAutomationState,
+    ManualPaymentOriginalCashbook,
+    ManualPaymentOriginalBank,
+    ManualPaymentProcessedCashbook,
+    ManualPaymentProcessedBank,
+    ManualPaymentState,
+    BacsReviewOriginal,
+    BacsReviewProcessed,
+    BacsReviewState,
+    PartnerTransfer,
+    PartnerTransferIn,
+    PartnerTransferOut,
+) = create_models(db)
 
 # Register Journals Processing Blueprint
 from journals_bp import journals_bp, init_blueprint
@@ -60,6 +95,25 @@ globals()['LookerCashbookTransaction'] = LookerCashbookTransaction
 globals()['MatchedTransaction'] = MatchedTransaction
 globals()['ReconciliationResults'] = ReconciliationResults
 globals()['JournalTransaction'] = JournalTransaction
+globals()['FPDataset'] = FPDataset
+globals()['FPJournalRow'] = FPJournalRow
+globals()['FPWorkingRow'] = FPWorkingRow
+globals()['FPSummitInstallment'] = FPSummitInstallment
+globals()['FPProcessedJournal'] = FPProcessedJournal
+globals()['FPMatchResult'] = FPMatchResult
+globals()['FPDatasetEU'] = FPDatasetEU
+globals()['FPJournalRowEU'] = FPJournalRowEU
+globals()['FPSummitInstallmentEU'] = FPSummitInstallmentEU
+globals()['FPMatchResultEU'] = FPMatchResultEU
+globals()['FPProcessedJournalEU'] = FPProcessedJournalEU
+globals()['StripeAutomationData'] = StripeAutomationData
+globals()['StripeAutomationProcessed'] = StripeAutomationProcessed
+globals()['StripeAutomationState'] = StripeAutomationState
+globals()['ManualPaymentOriginalCashbook'] = ManualPaymentOriginalCashbook
+globals()['ManualPaymentOriginalBank'] = ManualPaymentOriginalBank
+globals()['ManualPaymentProcessedCashbook'] = ManualPaymentProcessedCashbook
+globals()['ManualPaymentProcessedBank'] = ManualPaymentProcessedBank
+globals()['ManualPaymentState'] = ManualPaymentState
 
 # Ensure all tables exist (including newly added state tables)
 with app.app_context():
@@ -252,6 +306,825 @@ def subsidiary_reconciliation_page(job_id, subsidiary_id):
     """Individual subsidiary reconciliation page"""
     return render_template('subsidiary_reconciliation.html', job_id=job_id, subsidiary_id=subsidiary_id)
 
+@app.route('/bacs-review/<int:job_id>/<int:subsidiary_id>')
+def bacs_review_page(job_id, subsidiary_id):
+    """Bacs Review page for UK subsidiary"""
+    return render_template('bacs_review.html', job_id=job_id, subsidiary_id=subsidiary_id)
+
+@app.route('/process-partner-transfers/<int:job_id>/<int:subsidiary_id>')
+def process_partner_transfers_page(job_id, subsidiary_id):
+    """Process Partner Transfers page for USA subsidiary"""
+    return render_template('process_partner_transfers.html', job_id=job_id, subsidiary_id=subsidiary_id)
+
+
+# ---------- Partner Transfer API (Process Partner Transfers - USA) ----------
+def _partner_excel_to_rows(df):
+    """Normalize Partner Excel columns (strip spaces, handle renames) and yield dicts for DB."""
+    import pandas as pd
+    col_map = {
+        'payment_date': 'payment_date', 'client_id': 'client_id', 'invoice_number': 'invoice_number',
+        'billing_entity': 'billing_entity', 'ar_account': 'ar_account', 'currency': 'currency',
+        'exchange_rate': 'exchange_rate', 'amount': 'amount', 'account': 'account',
+        'Location': 'location', 'location': 'location', 'transtype': 'transtype',
+        'comment': 'comment', 'Comment': 'comment', 'Card Reference': 'card_reference', 'card_reference': 'card_reference',
+        'reasoncode': 'reasoncode', 'sepaprovider': 'sepaprovider',
+        'invoice #': 'invoice_ref', 'payment #': 'payment_ref', 'Memo': 'memo', 'memo': 'memo',
+        'In Stripe Can': 'in_stripe_can', 'in_stripe_can': 'in_stripe_can',
+    }
+    for _, row in df.iterrows():
+        out = {}
+        for col in df.columns:
+            key_raw = col.strip() if isinstance(col, str) else col
+            db_col = col_map.get(key_raw) or col_map.get(col)
+            if db_col is None and key_raw == 'amount':
+                db_col = 'amount'
+            if db_col is None:
+                continue
+            val = row[col] if col in row.index else row.get(col)
+            if pd.isna(val):
+                out[db_col] = None
+            elif db_col == 'payment_date':
+                if hasattr(val, 'to_pydatetime'):
+                    out[db_col] = val.to_pydatetime()
+                else:
+                    out[db_col] = val
+            elif db_col == 'amount':
+                try:
+                    out[db_col] = float(val)
+                except (TypeError, ValueError):
+                    out[db_col] = None
+            else:
+                out[db_col] = str(val).strip() if val is not None else None
+        if 'amount' in out or 'payment_date' in out:
+            yield out
+
+
+@app.route('/api/partner-transfer/upload/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
+def partner_transfer_upload(job_id, subsidiary_id):
+    """Upload Partner Transfer Excel; store in partner_transfer table."""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'}), 400
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'}), 400
+    if not allowed_file(file.filename):
+        return jsonify({'success': False, 'error': 'File must be Excel (.xlsx or .xls)'}), 400
+    try:
+        import pandas as pd
+        df = pd.read_excel(file, sheet_name=0)
+        if df.empty:
+            return jsonify({'success': False, 'error': 'Excel file has no data'}), 400
+        PartnerTransfer.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        count = 0
+        for r in _partner_excel_to_rows(df):
+            row = PartnerTransfer(
+                job_id=job_id,
+                subsidiary_id=subsidiary_id,
+                payment_date=r.get('payment_date'),
+                client_id=int(float(r['client_id'])) if r.get('client_id') is not None and str(r.get('client_id')).replace('.', '', 1).isdigit() else None,
+                invoice_number=r.get('invoice_number'),
+                billing_entity=r.get('billing_entity'),
+                ar_account=r.get('ar_account'),
+                currency=r.get('currency'),
+                exchange_rate=float(r['exchange_rate']) if r.get('exchange_rate') is not None else None,
+                amount=float(r['amount']) if r.get('amount') is not None else None,
+                account=r.get('account'),
+                location=r.get('location'),
+                transtype=r.get('transtype'),
+                comment=r.get('comment'),
+                card_reference=str(r['card_reference']) if r.get('card_reference') is not None else None,
+                reasoncode=float(r['reasoncode']) if r.get('reasoncode') is not None and str(r.get('reasoncode')) != '' else None,
+                sepaprovider=float(r['sepaprovider']) if r.get('sepaprovider') is not None and str(r.get('sepaprovider')) != '' else None,
+                invoice_ref=r.get('invoice_ref'),
+                payment_ref=r.get('payment_ref'),
+                memo=r.get('memo') or 'Partner Transfer',
+                in_stripe_can=r.get('in_stripe_can'),
+            )
+            db.session.add(row)
+            count += 1
+        db.session.commit()
+        return jsonify({'success': True, 'rows': count})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/partner-transfer/status/<int:job_id>/<int:subsidiary_id>')
+def partner_transfer_status(job_id, subsidiary_id):
+    """Return counts for uploaded data and processed outputs."""
+    uploaded = PartnerTransfer.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+    transfer_in = PartnerTransferIn.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+    transfer_out = PartnerTransferOut.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+    return jsonify({
+        'uploaded': uploaded,
+        'transfer_in': transfer_in,
+        'transfer_out': transfer_out,
+    })
+
+
+@app.route('/api/partner-transfer/clear/<int:job_id>/<int:subsidiary_id>', methods=['DELETE', 'POST'])
+def partner_transfer_clear(job_id, subsidiary_id):
+    """Delete all uploaded and processed partner transfer data for this job/subsidiary so user can re-upload and re-process."""
+    try:
+        PartnerTransfer.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        PartnerTransferIn.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        PartnerTransferOut.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'All partner transfer data cleared.'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/partner-transfer/view/<int:job_id>/<int:subsidiary_id>')
+def partner_transfer_view_api(job_id, subsidiary_id):
+    """Return uploaded Partner Transfer rows for viewing (JSON)."""
+    rows = PartnerTransfer.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).order_by(PartnerTransfer.id).all()
+    out = []
+    for r in rows:
+        out.append({
+            'id': r.id,
+            'payment_date': r.payment_date.strftime('%d/%m/%Y') if r.payment_date else None,
+            'client_id': r.client_id,
+            'invoice_number': r.invoice_number,
+            'billing_entity': r.billing_entity,
+            'ar_account': r.ar_account,
+            'currency': r.currency,
+            'exchange_rate': float(r.exchange_rate) if r.exchange_rate is not None else None,
+            'amount': float(r.amount) if r.amount is not None else None,
+            'account': r.account,
+            'location': r.location,
+            'transtype': r.transtype,
+            'comment': r.comment,
+            'card_reference': r.card_reference,
+            'reasoncode': float(r.reasoncode) if r.reasoncode is not None else None,
+            'sepaprovider': float(r.sepaprovider) if r.sepaprovider is not None else None,
+            'invoice_ref': r.invoice_ref,
+            'payment_ref': r.payment_ref,
+            'memo': r.memo,
+            'in_stripe_can': r.in_stripe_can,
+        })
+    return jsonify(out)
+
+
+def _parse_partner_id_from_comment(comment):
+    """Extract partner client id from comment e.g. 'Partner payment transfer:44650' -> 44650."""
+    if not comment:
+        return None
+    s = str(comment).strip()
+    if ':' in s:
+        try:
+            return s.split(':')[-1].strip()
+        except Exception:
+            return None
+    return None
+
+
+@app.route('/api/partner-transfer/process/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
+def partner_transfer_process(job_id, subsidiary_id):
+    """Generate Transfer In and Transfer Out from uploaded Partner data; store in DB."""
+    try:
+        rows = PartnerTransfer.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+        if not rows:
+            return jsonify({'success': False, 'error': 'No uploaded Partner data. Upload a file first.'}), 400
+        PartnerTransferIn.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        PartnerTransferOut.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        # Transfer In: positive amounts only
+        for r in rows:
+            if r.amount is not None and float(r.amount) > 0:
+                db.session.add(PartnerTransferIn(
+                    job_id=job_id,
+                    subsidiary_id=subsidiary_id,
+                    payment_date=r.payment_date,
+                    client_id=r.client_id,
+                    invoice_number=r.invoice_number,
+                    billing_entity=r.billing_entity,
+                    ar_account=r.ar_account,
+                    currency=r.currency,
+                    exchange_rate=r.exchange_rate,
+                    amount=r.amount,
+                    account=r.account,
+                    location=r.location,
+                    transtype=r.transtype,
+                    comment=r.comment,
+                    card_reference=r.card_reference,
+                    reasoncode=r.reasoncode,
+                    sepaprovider=r.sepaprovider,
+                    invoice_ref=r.invoice_ref,
+                    payment_ref=r.payment_ref,
+                    memo=r.memo or 'Partner Transfer',
+                    in_stripe_can=r.in_stripe_can,
+                ))
+        # Transfer Out: journal (Cr total, then Dr per negative row).
+        # Each negative amount pairs with a positive amount (same abs value). Memo = "Partner Transfer:{client_id}" where client_id is the CLIENT for whom the transfer is (the positive row's client), not 44650. Name = always 44650.
+        from collections import defaultdict
+        negative_rows = [r for r in rows if r.amount is not None and float(r.amount) < 0]
+        positive_by_amount = defaultdict(list)
+        for r in rows:
+            if r.amount is not None and float(r.amount) > 0 and r.client_id is not None:
+                positive_by_amount[float(r.amount)].append(r.client_id)
+        total_cr = sum(abs(float(r.amount)) for r in negative_rows)
+        entity = (rows[0].billing_entity or '') if rows else ''
+        bank_account = (rows[0].account or '') if rows else ''
+        region = (rows[0].location or 'United States') if rows else 'United States'
+        ar_account = (rows[0].ar_account or '11010 Accounts Receivable : Trade Debtors') if rows else '11010 Accounts Receivable : Trade Debtors'
+        date_cr = max((r.payment_date for r in rows if r.payment_date), default=datetime.utcnow())
+        db.session.add(PartnerTransferOut(
+            job_id=job_id,
+            subsidiary_id=subsidiary_id,
+            date=date_cr,
+            memo='Partner Transfer',
+            entity=entity,
+            name=None,
+            account=bank_account,
+            management_pl='Balance Sheet',
+            dept='Balance Sheet',
+            cost_centre='Balance Sheet',
+            region=region,
+            dr=None,
+            cr=total_cr,
+        ))
+        for r in negative_rows:
+            amt = abs(float(r.amount))
+            # Memo = Partner Transfer:{client_id} where client_id is the client for whom the transfer is (the positive row with same amount)
+            memo_client_ids = positive_by_amount.get(amt) or []
+            memo_client_id = memo_client_ids.pop(0) if memo_client_ids else None
+            memo = 'Partner Transfer:' + str(memo_client_id) if memo_client_id else 'Partner Transfer'
+            db.session.add(PartnerTransferOut(
+                job_id=job_id,
+                subsidiary_id=subsidiary_id,
+                date=r.payment_date,
+                memo=memo,
+                entity=entity,
+                name='44650',
+                account=ar_account,
+                management_pl='Balance Sheet',
+                dept='Balance Sheet',
+                cost_centre='Balance Sheet',
+                region=region,
+                dr=amt,
+                cr=None,
+            ))
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'transfer_in_rows': PartnerTransferIn.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count(),
+            'transfer_out_rows': PartnerTransferOut.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count(),
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# CSV headers must match sample files exactly (partner/Transferin.csv and Transferout.csv)
+TRANSFERIN_CSV_HEADERS = [
+    'payment_date', 'client_id', 'invoice_number', 'billing_entity', 'ar_account', 'currency', 'exchange_rate', ' amount ', 'account', 'Location',
+    'transtype', 'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo', 'In Stripe Can'
+]
+TRANSFEROUT_CSV_HEADERS = ['Date', 'memo', 'Entity', 'Name', 'Account', 'Management P&L', 'Dept.', 'Cost centre', 'Region', 'Dr', 'Cr']
+
+
+@app.route('/api/partner-transfer/download-transferin/<int:job_id>/<int:subsidiary_id>')
+def partner_transfer_download_transferin(job_id, subsidiary_id):
+    """Download Transfer In data as CSV (exact format as partner/Transferin.csv)."""
+    import csv
+    import io
+    rows = PartnerTransferIn.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).order_by(PartnerTransferIn.id).all()
+    if not rows:
+        return jsonify({'error': 'No Transfer In data. Run Process first.'}), 404
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(TRANSFERIN_CSV_HEADERS)
+    for r in rows:
+        w.writerow([
+            r.payment_date.strftime('%d/%m/%Y') if r.payment_date else '',
+            r.client_id,
+            r.invoice_number or '',
+            r.billing_entity or '',
+            r.ar_account or '',
+            r.currency or '',
+            r.exchange_rate if r.exchange_rate is not None else '',
+            r.amount if r.amount is not None else '',
+            r.account or '',
+            r.location or '',
+            r.transtype or '',
+            r.comment or '',
+            r.card_reference if r.card_reference is not None else '',
+            r.reasoncode if r.reasoncode is not None else '',
+            r.sepaprovider if r.sepaprovider is not None else '',
+            r.invoice_ref or '',
+            r.payment_ref or '',
+            r.memo or 'Partner Transfer',
+            r.in_stripe_can or '',
+        ])
+    buf.seek(0)
+    return send_file(
+        io.BytesIO(buf.getvalue().encode('utf-8')),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f'Transferin_job_{job_id}_sub_{subsidiary_id}.csv',
+    )
+
+
+@app.route('/api/partner-transfer/download-transferout/<int:job_id>/<int:subsidiary_id>')
+def partner_transfer_download_transferout(job_id, subsidiary_id):
+    """Download Transfer Out data as CSV (exact format as partner/Transferout.csv)."""
+    import csv
+    import io
+    rows = PartnerTransferOut.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).order_by(PartnerTransferOut.id).all()
+    if not rows:
+        return jsonify({'error': 'No Transfer Out data. Run Process first.'}), 404
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(TRANSFEROUT_CSV_HEADERS)
+    for r in rows:
+        w.writerow([
+            r.date.strftime('%d/%m/%Y') if r.date else '',
+            r.memo or '',
+            r.entity or '',
+            r.name or '',
+            r.account or '',
+            r.management_pl or '',
+            r.dept or '',
+            r.cost_centre or '',
+            r.region or '',
+            r.dr if r.dr is not None else '',
+            r.cr if r.cr is not None else '',
+        ])
+    buf.seek(0)
+    return send_file(
+        io.BytesIO(buf.getvalue().encode('utf-8')),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f'Transferout_job_{job_id}_sub_{subsidiary_id}.csv',
+    )
+
+@app.route('/api/bacs-review/upload/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
+def upload_bacs_review_file(job_id, subsidiary_id):
+    """Upload Bacs Review Excel file for UK subsidiary - stores in original table"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if file and allowed_file(file.filename):
+        try:
+            import pandas as pd
+            import json
+            import datetime as dt_module
+            import numpy as np
+            
+            # Read the Excel content
+            df = pd.read_excel(file)
+            
+            # Convert DataFrame rows to JSON-serializable format
+            def df_to_rows(df):
+                df2 = df.fillna("")
+                out = []
+                cols = list(df2.columns)
+                for i in range(len(df2)):
+                    record = {}
+                    for k in cols:
+                        v = df2.iloc[i][k]
+                        # Datetime-like
+                        if isinstance(v, (dt_module.date, dt_module.datetime)):
+                            v = v.isoformat()
+                        elif isinstance(v, pd.Timestamp):
+                            v = v.to_pydatetime().isoformat()
+                        # Numpy scalars
+                        elif isinstance(v, np.integer):
+                            v = int(v)
+                        elif isinstance(v, np.floating):
+                            v = float(v) if not np.isnan(v) else ""
+                        elif isinstance(v, np.bool_):
+                            v = bool(v)
+                        record[k] = v
+                    out.append(record)
+                return out
+            
+            rows = df_to_rows(df)
+            
+            # Delete existing original data for this job/subsidiary
+            BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+            db.session.commit()
+            
+            # Store original rows
+            for row in rows:
+                bacs_row = BacsReviewOriginal(
+                    job_id=job_id,
+                    subsidiary_id=subsidiary_id,
+                    row_json=json.dumps(row)
+                )
+                db.session.add(bacs_row)
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': f'File uploaded successfully',
+                'row_count': len(rows),
+                'filename': file.filename
+            })
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Error processing file: {str(e)}'}), 500
+    else:
+        return jsonify({'error': 'Invalid file type. Please upload an Excel file (.xlsx or .xls)'}), 400
+
+@app.route('/api/bacs-review/process/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
+def process_bacs_review(job_id, subsidiary_id):
+    """Process Bacs Review: Remove UKDDREJECT transactions and their matching originals that net to zero"""
+    import pandas as pd
+    import json
+    try:
+        # Load original data
+        original_rows = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+        if not original_rows:
+            return jsonify({'success': False, 'error': 'No original data found. Please upload a file first.'}), 400
+        
+        # Convert to DataFrame
+        data = [json.loads(r.row_json) for r in original_rows]
+        if not data:
+            return jsonify({'success': False, 'error': 'No data to process'}), 400
+        
+        cols = list(data[0].keys())
+        df = pd.DataFrame(data)[cols]
+        
+        # Find UKDDREJECT transactions
+        rejects = df[df['transtype'] == 'UKDDREJECT'].copy()
+        
+        # Track matched pairs and unmatched rejects
+        matched_pairs = []
+        unmatched_rejects = []
+        rows_to_remove = set()
+        
+        # For each reject, find matching original transaction
+        for reject_idx, reject in rejects.iterrows():
+            client_id = reject['client_id']
+            reject_amount = reject['amount']
+            
+            # Find original transactions for same client_id (excluding rejects)
+            originals = df[(df['client_id'] == client_id) & 
+                          (df['transtype'] != 'UKDDREJECT') & 
+                          (df.index != reject_idx)]
+            
+            # Find original where amount nets to zero (within 1 cent tolerance)
+            found_match = False
+            for orig_idx, orig in originals.iterrows():
+                orig_amount = orig['amount']
+                if abs(orig_amount + reject_amount) < 0.01:
+                    # Found a match - mark both for removal
+                    matched_pairs.append({
+                        'reject': {
+                            'index': int(reject_idx),
+                            'client_id': int(client_id),
+                            'amount': float(reject_amount),
+                            'invoice_number': str(reject.get('invoice_number', ''))
+                        },
+                        'original': {
+                            'index': int(orig_idx),
+                            'client_id': int(client_id),
+                            'amount': float(orig_amount),
+                            'invoice_number': str(orig.get('invoice_number', ''))
+                        }
+                    })
+                    rows_to_remove.add(reject_idx)
+                    rows_to_remove.add(orig_idx)
+                    found_match = True
+                    break
+            
+            if not found_match:
+                unmatched_rejects.append({
+                    'index': int(reject_idx),
+                    'client_id': int(client_id),
+                    'amount': float(reject_amount),
+                    'invoice_number': str(reject.get('invoice_number', '')),
+                    'payment_date': str(reject.get('payment_date', ''))
+                })
+        
+        # Create processed DataFrame (remove matched pairs)
+        processed_df = df[~df.index.isin(rows_to_remove)].copy()
+        
+        # Calculate totals for reconciliation
+        original_total_amount = float(df['amount'].sum()) if 'amount' in df.columns else 0.0
+        processed_total_amount = float(processed_df['amount'].sum()) if 'amount' in processed_df.columns else 0.0
+        amount_difference = abs(original_total_amount - processed_total_amount)
+        
+        # Delete existing processed data
+        BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        db.session.commit()
+        
+        # Store processed rows
+        def df_to_rows(df):
+            import datetime as dt_module
+            import numpy as np
+            df2 = df.fillna("")
+            out = []
+            cols = list(df2.columns)
+            for i in range(len(df2)):
+                record = {}
+                for k in cols:
+                    v = df2.iloc[i][k]
+                    if isinstance(v, (dt_module.date, dt_module.datetime)):
+                        v = v.isoformat()
+                    elif isinstance(v, pd.Timestamp):
+                        v = v.to_pydatetime().isoformat()
+                    elif isinstance(v, np.integer):
+                        v = int(v)
+                    elif isinstance(v, np.floating):
+                        v = float(v) if not np.isnan(v) else ""
+                    elif isinstance(v, np.bool_):
+                        v = bool(v)
+                    record[k] = v
+                out.append(record)
+            return out
+        
+        processed_rows = df_to_rows(processed_df)
+        
+        for row in processed_rows:
+            bacs_row = BacsReviewProcessed(
+                job_id=job_id,
+                subsidiary_id=subsidiary_id,
+                row_json=json.dumps(row)
+            )
+            db.session.add(bacs_row)
+        
+        # Update state
+        state = BacsReviewState.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).first()
+        if not state:
+            state = BacsReviewState(job_id=job_id, subsidiary_id=subsidiary_id)
+            db.session.add(state)
+        
+        state.original_count = len(df)
+        state.processed_count = len(processed_df)
+        state.removed_pairs_count = len(matched_pairs)
+        state.unmatched_rejects_count = len(unmatched_rejects)
+        state.unmatched_rejects_json = json.dumps(unmatched_rejects) if unmatched_rejects else None
+        state.last_run_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Processed successfully. Removed {len(matched_pairs)} matched pairs.',
+            'original_count': len(df),
+            'processed_count': len(processed_df),
+            'original_total_amount': original_total_amount,
+            'processed_total_amount': processed_total_amount,
+            'amount_difference': amount_difference,
+            'amounts_match': amount_difference < 0.01,  # True if difference is less than 1 cent
+            'removed_pairs': len(matched_pairs),
+            'unmatched_rejects': len(unmatched_rejects),
+            'matched_pairs': matched_pairs[:10],  # Return first 10 for display
+            'unmatched_rejects': unmatched_rejects
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        return jsonify({'success': False, 'error': f'Error processing: {str(e)}\n{traceback.format_exc()}'}), 500
+
+@app.route('/api/bacs-review/clear/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
+def clear_bacs_review_data(job_id, subsidiary_id):
+    """Clear Bacs Review data for UK subsidiary"""
+    try:
+        scope = request.json.get('scope', 'all') if request.is_json else 'all'
+        
+        if scope == 'processed':
+            # Clear only processed data
+            BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+            state = BacsReviewState.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).first()
+            if state:
+                state.processed_count = 0
+                state.removed_pairs_count = 0
+                state.unmatched_rejects_count = 0
+                state.unmatched_rejects_json = None
+        else:
+            # Clear all data
+            BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+            BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+            BacsReviewState.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).delete()
+        
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Bacs review data cleared successfully'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Error clearing data: {str(e)}'}), 500
+
+@app.route('/api/bacs-review/status/<int:job_id>/<int:subsidiary_id>')
+def bacs_review_status(job_id, subsidiary_id):
+    """Get status of Bacs Review data"""
+    try:
+        import pandas as pd
+        
+        original_count = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+        processed_count = BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+        
+        # Calculate totals from actual data
+        original_total_amount = 0.0
+        processed_total_amount = 0.0
+        
+        if original_count > 0:
+            original_rows = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+            original_data = [json.loads(r.row_json) for r in original_rows]
+            if original_data:
+                original_df = pd.DataFrame(original_data)
+                if 'amount' in original_df.columns:
+                    original_total_amount = float(original_df['amount'].sum())
+        
+        if processed_count > 0:
+            processed_rows = BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+            processed_data = [json.loads(r.row_json) for r in processed_rows]
+            if processed_data:
+                processed_df = pd.DataFrame(processed_data)
+                if 'amount' in processed_df.columns:
+                    processed_total_amount = float(processed_df['amount'].sum())
+        
+        amount_difference = abs(original_total_amount - processed_total_amount)
+        
+        state = BacsReviewState.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).first()
+        
+        unmatched_rejects = []
+        if state and state.unmatched_rejects_json:
+            unmatched_rejects = json.loads(state.unmatched_rejects_json)
+        
+        return jsonify({
+            'success': True,
+            'original_count': original_count,
+            'processed_count': processed_count,
+            'original_total_amount': original_total_amount,
+            'processed_total_amount': processed_total_amount,
+            'amount_difference': amount_difference,
+            'amounts_match': amount_difference < 0.01,
+            'removed_pairs': state.removed_pairs_count if state else 0,
+            'unmatched_rejects_count': state.unmatched_rejects_count if state else 0,
+            'unmatched_rejects': unmatched_rejects,
+            'last_run_at': state.last_run_at.isoformat() if state and state.last_run_at else None
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def _bacs_short_date(val):
+    """Format ISO date/datetime string to short date DD/MM/YYYY for Bacs display and CSV."""
+    if val is None or val == '':
+        return val
+    s = str(val).strip()
+    if not s:
+        return val
+    try:
+        from datetime import datetime as dt
+        if 'T' in s:
+            d = dt.fromisoformat(s.replace('Z', '+00:00'))
+        elif ' ' in s:
+            d = dt.strptime(s.split(' ')[0], '%Y-%m-%d')
+        else:
+            d = dt.strptime(s[:10], '%Y-%m-%d')
+        return d.strftime('%d/%m/%Y')
+    except Exception:
+        return val
+
+
+def _bacs_format_row_for_display(row):
+    """Return a copy of row with date-like values as short date DD/MM/YYYY."""
+    out = {}
+    for k, v in row.items():
+        if v is not None and isinstance(v, str) and (v.startswith('20') and ('-' in v or 'T' in v)):
+            out[k] = _bacs_short_date(v)
+        else:
+            out[k] = v
+    return out
+
+
+@app.route('/bacs-review/view/<int:job_id>/<int:subsidiary_id>')
+def bacs_review_view_page(job_id, subsidiary_id):
+    """Render Bacs Review data view page"""
+    try:
+        data_type = request.args.get('type', 'original')  # 'original' or 'processed'
+        limit = int(request.args.get('limit', 500))
+        
+        if data_type == 'original':
+            rows = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).limit(limit).all()
+            title = 'Bacs Review - Original Data'
+        elif data_type == 'processed':
+            rows = BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).limit(limit).all()
+            title = 'Bacs Review - Processed Data'
+        else:
+            return jsonify({'success': False, 'error': 'Invalid type. Use "original" or "processed"'}), 400
+        
+        if not rows:
+            return render_template('manual_payment_view.html', title=title, headers=[], rows=[])
+        
+        # Build headers and rows; format dates as short date DD/MM/YYYY
+        raw = [json.loads(r.row_json) for r in rows]
+        headers = []
+        seen = set()
+        for row in raw:
+            for k in row.keys():
+                if k not in seen:
+                    headers.append(k)
+                    seen.add(k)
+        data = [_bacs_format_row_for_display(row) for row in raw]
+        
+        return render_template('manual_payment_view.html', title=title, headers=headers, rows=data)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/bacs-review/view/<int:job_id>/<int:subsidiary_id>')
+def bacs_review_view_api(job_id, subsidiary_id):
+    """API endpoint for Bacs Review data - returns JSON"""
+    try:
+        data_type = request.args.get('type', 'original')  # 'original' or 'processed'
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        if data_type == 'original':
+            q = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id)
+        elif data_type == 'processed':
+            q = BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id)
+        else:
+            return jsonify({'success': False, 'error': 'Invalid type. Use "original" or "processed"'}), 400
+        
+        total = q.count()
+        rows = q.offset(offset).limit(limit).all()
+        
+        if not rows:
+            return jsonify({'success': True, 'headers': [], 'rows': [], 'total': 0})
+        
+        # Build headers and rows; format dates as short date DD/MM/YYYY for display
+        raw = [json.loads(r.row_json) for r in rows]
+        headers = []
+        seen = set()
+        for row in raw:
+            for k in row.keys():
+                if k not in seen:
+                    headers.append(k)
+                    seen.add(k)
+        data = [_bacs_format_row_for_display(row) for row in raw]
+        
+        return jsonify({
+            'success': True,
+            'headers': headers,
+            'rows': data,
+            'total': total,
+            'offset': offset,
+            'limit': limit
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/bacs-review/download/<int:job_id>/<int:subsidiary_id>')
+def bacs_review_download(job_id, subsidiary_id):
+    """Download Bacs Review data as CSV with exact same headers as processed/original data. Dates in short format DD/MM/YYYY."""
+    import csv
+    import io
+    try:
+        data_type = request.args.get('type', 'processed')  # 'original' or 'processed'
+        
+        if data_type == 'original':
+            rows = BacsReviewOriginal.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+            filename = f'bacs_review_original_job_{job_id}_sub_{subsidiary_id}.csv'
+        elif data_type == 'processed':
+            rows = BacsReviewProcessed.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all()
+            filename = f'bacs_review_processed_job_{job_id}_sub_{subsidiary_id}.csv'
+        else:
+            return jsonify({'success': False, 'error': 'Invalid type'}), 400
+        
+        if not rows:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+        
+        data = [json.loads(r.row_json) for r in rows]
+        if not data:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+        
+        # Headers = exact column order from first row
+        headers = list(data[0].keys())
+        # Format rows: dates as short date DD/MM/YYYY, same header order
+        formatted = []
+        for row in data:
+            out = _bacs_format_row_for_display(row)
+            formatted.append([out.get(h, '') for h in headers])
+        
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(headers)
+        w.writerows(formatted)
+        buf.seek(0)
+        
+        return send_file(
+            io.BytesIO(buf.getvalue().encode('utf-8')),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': f'{str(e)}\n{traceback.format_exc()}'}), 500
+
 @app.route('/prepare/<int:job_id>')
 def file_preparation_page(job_id):
     """File preparation page for converting files to reconciliation format"""
@@ -271,6 +1144,643 @@ def looker_data_page(job_id):
 def stripe_automation_page(job_id):
     """Page for Stripe File Automation"""
     return render_template('stripe_automation.html', job_id=job_id)
+
+@app.route('/manual-payment-automation/<int:job_id>')
+def manual_payment_automation_page(job_id):
+    """Page for Manual Payment Automation"""
+    return render_template('manual_payment_automation.html', job_id=job_id)
+
+# ==================== MANUAL PAYMENT AUTOMATION APIs ====================
+
+@app.route('/api/manual-pay/status/<int:job_id>')
+def manual_pay_status(job_id):
+    try:
+        cb_count = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).count()
+        bs_count = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).count()
+        pcb_count = ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).count()
+        pbs_count = ManualPaymentProcessedBank.query.filter_by(job_id=job_id).count()
+
+        state = ManualPaymentState.query.filter_by(job_id=job_id).first()
+        return jsonify({
+            'success': True,
+            'original': {'cashbook_rows': cb_count, 'bank_rows': bs_count},
+            'processed': {'cashbook_rows': pcb_count, 'bank_rows': pbs_count},
+            'state': {
+                'last_run_at': state.last_run_at.isoformat() if state and state.last_run_at else None,
+                'matched_count': state.matched_count if state else 0,
+                'unmatched_bank_count': state.unmatched_bank_count if state else 0,
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/upload/<int:job_id>', methods=['POST'])
+def manual_pay_upload(job_id):
+    """Upload two files: cashbook (cashbookfull) and bank statement (BS). Replace originals for job_id."""
+    import pandas as pd
+    from io import BytesIO
+    try:
+        if 'cashbook' not in request.files or 'bank' not in request.files:
+            return jsonify({'success': False, 'error': 'Please upload both Cashbook and Bank files'}), 400
+
+        cashbook_file = request.files['cashbook']
+        bank_file = request.files['bank']
+
+        def read_any(file_storage):
+            filename = file_storage.filename.lower()
+            if filename.endswith('.xlsx') or filename.endswith('.xls'):
+                # Read all sheets and concatenate (handles BS file with 2 tabs)
+                xls = pd.read_excel(file_storage, sheet_name=None)
+                frames = []
+                for name, df in xls.items():
+                    if df is not None and not df.empty:
+                        frames.append(df)
+                return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            # CSV default to cp1252 to match NetSuite exports
+            return pd.read_csv(file_storage, encoding='cp1252')
+
+        cb_df = read_any(cashbook_file)
+        bs_df = read_any(bank_file)
+
+        # Replace originals
+        ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).delete()
+        ManualPaymentOriginalBank.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+
+        # Store originals as row_json preserving headers
+        def df_to_rows(df):
+            # Convert NaN to empty strings, preserve order; coerce datetimes and numpy types
+            import datetime as _dt
+            import pandas as _pd
+            import numpy as _np
+            df2 = df.fillna("")
+            out = []
+            cols = list(df2.columns)
+            for i in range(len(df2)):
+                record = {}
+                for k in cols:
+                    v = df2.iloc[i][k]
+                    # Datetime-like
+                    if isinstance(v, (_dt.date, _dt.datetime)):
+                        v = v.isoformat()
+                    elif isinstance(v, _pd.Timestamp):
+                        v = v.to_pydatetime().isoformat()
+                    # Numpy scalars
+                    elif isinstance(v, _np.integer):
+                        v = int(v)
+                    elif isinstance(v, _np.floating):
+                        v = float(v) if not _np.isnan(v) else ""
+                    elif isinstance(v, _np.bool_):
+                        v = bool(v)
+                    record[k] = v
+                out.append(json.dumps(record, ensure_ascii=False))
+            return out
+
+        for row_json in df_to_rows(cb_df):
+            db.session.add(ManualPaymentOriginalCashbook(job_id=job_id, row_json=row_json))
+        for row_json in df_to_rows(bs_df):
+            db.session.add(ManualPaymentOriginalBank(job_id=job_id, row_json=row_json))
+        # Initialize/update state
+        state = ManualPaymentState.query.filter_by(job_id=job_id).first()
+        if not state:
+            state = ManualPaymentState(job_id=job_id)
+            db.session.add(state)
+        state.cashbook_count = len(cb_df)
+        state.bank_count = len(bs_df)
+        state.matched_count = 0
+        state.unmatched_bank_count = 0
+        db.session.commit()
+
+        return jsonify({'success': True, 'cashbook_rows': len(cb_df), 'bank_rows': len(bs_df)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/process/<int:job_id>', methods=['POST'])
+def manual_pay_process(job_id):
+    """Process originals: exact match by Date and Amount. Keep unmatched bank rows in processed bank."""
+    import pandas as pd
+    from datetime import datetime as dt
+    try:
+        # Load originals into DataFrames
+        cb_rows = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).all()
+        bs_rows = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).all()
+        if not cb_rows or not bs_rows:
+            return jsonify({'success': False, 'error': 'Upload both Cashbook and Bank files first'}), 400
+
+        def rows_to_df(rows):
+            data = [json.loads(r.row_json) for r in rows]
+            # preserve column order by first row keys
+            if data:
+                cols = list(data[0].keys())
+                return pd.DataFrame(data)[cols]
+            return pd.DataFrame()
+
+        cb_df = rows_to_df(cb_rows)
+        bs_df = rows_to_df(bs_rows)
+
+        # Normalize header detection with robust matching
+        import re
+        def normalize(name: str) -> str:
+            return re.sub(r'[^a-z0-9]', '', str(name).lower())
+
+        def build_colmap(df):
+            return {normalize(c): c for c in df.columns}
+
+        def find_col(df, candidates):
+            colmap = build_colmap(df)
+            for cand in candidates:
+                key = normalize(cand)
+                if key in colmap:
+                    return colmap[key]
+            return None
+
+        # Prefer exact known headers from your datasets, then fall back to normalized detection
+        cb_date_col = cb_df.columns[cb_df.columns.isin(['payment_date'])].tolist()
+        cb_date_col = cb_date_col[0] if cb_date_col else find_col(cb_df, ['Payment Date', 'payment_date', 'Date', 'paymentdate', 'date'])
+        cb_amt_col  = cb_df.columns[cb_df.columns.isin(['amount'])].tolist()
+        cb_amt_col  = cb_amt_col[0] if cb_amt_col else find_col(cb_df, ['Amount', 'amount'])
+        cb_client_col = cb_df.columns[cb_df.columns.isin(['client_id'])].tolist()
+        cb_client_col = cb_client_col[0] if cb_client_col else find_col(cb_df, ['Client ID', 'client_id', 'Client Number', 'client_number', 'client'])
+
+        bs_date_col = bs_df.columns[bs_df.columns.isin(['Date (MM/DD/YYYY)'])].tolist()
+        bs_date_col = bs_date_col[0] if bs_date_col else find_col(bs_df, ['Date', 'Transaction Date', 'TransactionDate', 'Value Date', 'Valuta Date', 'date', 'valuedate'])
+        bs_amt_col  = bs_df.columns[bs_df.columns.isin(['Amount'])].tolist()
+        bs_amt_col  = bs_amt_col[0] if bs_amt_col else find_col(bs_df, ['Amount', 'amount'])
+        bs_client_col = bs_df.columns[bs_df.columns.isin(['NS Customer Name'])].tolist()
+        bs_client_col = bs_client_col[0] if bs_client_col else find_col(bs_df, ['Client Number', 'client_number', 'Client ID', 'client_id', 'client'])
+
+        if not cb_amt_col or not bs_amt_col:
+            return jsonify({'success': False, 'error': f"Could not detect amount columns. Cashbook cols: {list(cb_df.columns)} | Bank cols: {list(bs_df.columns)}"}), 400
+
+        def norm_date(s):
+            try:
+                return pd.to_datetime(s, dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+            except Exception:
+                return pd.to_datetime(s, errors='coerce').dt.strftime('%Y-%m-%d')
+
+        def norm_amt(s):
+            # strip commas and currency symbols
+            def to_float(x):
+                if isinstance(x, (int, float)):
+                    return float(x)
+                if x is None:
+                    return 0.0
+                return float(str(x).replace(',', '').replace('£', '').replace('$', '').replace('€', '').strip() or 0)
+            return df_series.apply(to_float)
+
+        # Build keys
+        cb_dates = norm_date(cb_df[cb_date_col])
+        bs_dates = norm_date(bs_df[bs_date_col])
+
+        def to_float_series(series):
+            return series.apply(lambda x: float(str(x).replace(',', '').replace('£', '').replace('$', '').replace('€', '').strip() or 0))
+
+        cb_amts = to_float_series(cb_df[cb_amt_col])
+        bs_amts = to_float_series(bs_df[bs_amt_col])
+
+        # Build match keys: prefer Client+Amount; fallback to Date+Amount
+        if cb_client_col and bs_client_col:
+            cb_clients = cb_df[cb_client_col].astype(str).fillna('').str.strip()
+            bs_clients = bs_df[bs_client_col].astype(str).fillna('').str.strip()
+            cb_df['_key'] = cb_clients + '|' + cb_amts.round(2).astype(str)
+            bs_df['_key'] = bs_clients + '|' + bs_amts.round(2).astype(str)
+        else:
+            # Use dates; ensure we have date cols
+            if not cb_date_col or not bs_date_col:
+                return jsonify({'success': False, 'error': 'Could not detect client or date columns to build matches.'}), 400
+            cb_df['_key'] = cb_dates + '|' + cb_amts.round(2).astype(str)
+            bs_df['_key'] = bs_dates + '|' + bs_amts.round(2).astype(str)
+
+        # Build explicit match using inner join on DISTINCT bank keys to avoid row-multiplying duplicates
+        bs_keys_unique = bs_df[['_key']].drop_duplicates()
+        merged = cb_df.merge(bs_keys_unique, on='_key', how='inner')
+        # Unmatched bank rows
+        unmatched_bs = bs_df[~bs_df['_key'].isin(bs_keys_unique['_key'])].drop(columns=['_key'])
+
+        # Replace processed tables
+        ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).delete()
+        ManualPaymentProcessedBank.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+
+        # Processed cashbook = ONLY matched rows (same headers/order as original cashbook)
+        matched_cb = cb_df[cb_df['_key'].isin(merged['_key'])].drop(columns=['_key']).fillna("")
+        for _, row in matched_cb.iterrows():
+            db.session.add(ManualPaymentProcessedCashbook(job_id=job_id, row_json=json.dumps(row.to_dict(), ensure_ascii=False)))
+
+        for _, row in unmatched_bs.fillna("").iterrows():
+            db.session.add(ManualPaymentProcessedBank(job_id=job_id, row_json=json.dumps(row.to_dict(), ensure_ascii=False)))
+
+        # Update state
+        state = ManualPaymentState.query.filter_by(job_id=job_id).first()
+        if not state:
+            state = ManualPaymentState(job_id=job_id)
+            db.session.add(state)
+        state.matched_count = int(len(matched_cb))
+        state.unmatched_bank_count = len(unmatched_bs)
+        state.last_run_at = dt.utcnow()
+        db.session.commit()
+
+        return jsonify({'success': True, 'matched_rows': int(len(matched_cb)), 'unmatched_bank_rows': int(len(unmatched_bs))})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/inspect', methods=['POST'])
+def manual_pay_inspect():
+    """Inspect two files (cashbook, bank) and return headers, dtypes, and sample rows. No DB writes."""
+    import pandas as pd
+    try:
+        if 'cashbook' not in request.files or 'bank' not in request.files:
+            return jsonify({'success': False, 'error': 'Please upload both Cashbook and Bank files'}), 400
+
+        cashbook_file = request.files['cashbook']
+        bank_file = request.files['bank']
+
+        def read_any(file_storage):
+            name = file_storage.filename.lower()
+            if name.endswith('.xlsx') or name.endswith('.xls'):
+                xls = pd.read_excel(file_storage, sheet_name=None)
+                frames = [df for df in xls.values() if df is not None and not df.empty]
+                df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            else:
+                df = pd.read_csv(file_storage, encoding='cp1252')
+            return df
+
+        def summarize(df):
+            # Basic summary: columns, dtypes, first 5 rows as records
+            cols = list(df.columns)
+            dtypes = {c: str(df[c].dtype) for c in cols}
+            sample = df.head(5).fillna("").to_dict(orient='records')
+            return {'columns': cols, 'dtypes': dtypes, 'sample': sample, 'rows': int(len(df))}
+
+        cb_df = read_any(cashbook_file)
+        bs_df = read_any(bank_file)
+
+        # Heuristic guesses for date/amount
+        def find_col(df, candidates):
+            for c in candidates:
+                if c in df.columns:
+                    return c
+            lower = {c.lower(): c for c in df.columns}
+            for c in candidates:
+                if c.lower() in lower:
+                    return lower[c.lower()]
+            return None
+
+        cb_guess = {
+            'date': find_col(cb_df, ['Payment Date', 'payment_date', 'Date']),
+            'amount': find_col(cb_df, ['Amount', 'amount'])
+        }
+        bs_guess = {
+            'date': find_col(bs_df, ['Date', 'Transaction Date', 'date']),
+            'amount': find_col(bs_df, ['Amount', 'amount'])
+        }
+
+        return jsonify({
+            'success': True,
+            'cashbook': summarize(cb_df) | {'guesses': cb_guess},
+            'bank': summarize(bs_df) | {'guesses': bs_guess}
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/inspect-root', methods=['GET'])
+def manual_pay_inspect_root():
+    """Inspect root Cashbookfull.xlsx and BS.xlsx directly from project root."""
+    import pandas as pd
+    import os
+    try:
+        root = os.path.dirname(os.path.abspath(__file__))
+        root = os.path.dirname(root)  # move up from file to project root
+        cb_path = os.path.join(root, 'Cashbookfull.xlsx')
+        bs_path = os.path.join(root, 'BS.xlsx')
+        if not (os.path.exists(cb_path) and os.path.exists(bs_path)):
+            return jsonify({'success': False, 'error': 'Root files not found'}), 404
+
+        def read_xlsx(path):
+            xls = pd.read_excel(path, sheet_name=None)
+            frames = [df for df in xls.values() if df is not None and not df.empty]
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+        cb_df = read_xlsx(cb_path)
+        bs_df = read_xlsx(bs_path)
+
+        def summarize(df):
+            cols = list(df.columns)
+            dtypes = {c: str(df[c].dtype) for c in cols}
+            sample = df.head(5).fillna("").to_dict(orient='records')
+            return {'columns': cols, 'dtypes': dtypes, 'sample': sample, 'rows': int(len(df))}
+
+        def find_col(df, candidates):
+            for c in candidates:
+                if c in df.columns:
+                    return c
+            lower = {c.lower(): c for c in df.columns}
+            for c in candidates:
+                if c.lower() in lower:
+                    return lower[c.lower()]
+            return None
+
+        cb_guess = {
+            'date': find_col(cb_df, ['Payment Date', 'payment_date', 'Date']),
+            'amount': find_col(cb_df, ['Amount', 'amount'])
+        }
+        bs_guess = {
+            'date': find_col(bs_df, ['Date', 'Transaction Date', 'date']),
+            'amount': find_col(bs_df, ['Amount', 'amount'])
+        }
+
+        return jsonify({
+            'success': True,
+            'cashbook': summarize(cb_df) | {'guesses': cb_guess},
+            'bank': summarize(bs_df) | {'guesses': bs_guess}
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/clear/<int:job_id>', methods=['POST'])
+def manual_pay_clear(job_id):
+    """Clear processed or all data. Body JSON: { scope: 'processed' | 'all' }"""
+    try:
+        scope = request.json.get('scope', 'processed') if request.is_json else 'processed'
+        if scope not in ('processed', 'all'):
+            return jsonify({'success': False, 'error': 'Invalid scope'}), 400
+        ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).delete()
+        ManualPaymentProcessedBank.query.filter_by(job_id=job_id).delete()
+        if scope == 'all':
+            ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).delete()
+            ManualPaymentOriginalBank.query.filter_by(job_id=job_id).delete()
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _collect_headers_and_rows(rows):
+    # rows: list of model instances with row_json
+    data = [json.loads(r.row_json) for r in rows]
+    headers = []
+    seen = set()
+    for d in data:
+        for k in d.keys():
+            if k not in seen:
+                seen.add(k)
+                headers.append(k)
+    return headers, data
+
+
+def _df_to_csv_response(headers, data, filename):
+    import io, csv
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=headers, extrasaction='ignore')
+    writer.writeheader()
+    for row in data:
+        writer.writerow({k: row.get(k, '') for k in headers})
+    csv_bytes = buf.getvalue().encode('cp1252', errors='replace')
+    from flask import Response
+    return Response(csv_bytes, mimetype='text/csv', headers={
+        'Content-Disposition': f'attachment; filename="{filename}"'
+    })
+
+def _original_headers_for(job_id: int, ftype: str):
+    # ftype: 'cashbook' or 'bank'
+    if ftype == 'cashbook':
+        row = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).first()
+    else:
+        row = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).first()
+    if not row:
+        return []
+    try:
+        data = json.loads(row.row_json)
+        # preserve insertion order of keys as canonical header order
+        return list(data.keys())
+    except Exception:
+        return []
+
+
+@app.route('/api/manual-pay/download-original/<int:job_id>')
+def manual_pay_download_original(job_id):
+    """Download originals as CSV. Query param type=cashbook|bank"""
+    try:
+        ftype = request.args.get('type', 'cashbook')
+        if ftype == 'cashbook':
+            rows = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).all()
+            fname = f'manual_pay_original_cashbook_job_{job_id}.csv'
+        else:
+            rows = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).all()
+            fname = f'manual_pay_original_bank_job_{job_id}.csv'
+        if not rows:
+            return jsonify({'success': False, 'error': 'No data'}), 404
+        headers, data = _collect_headers_and_rows(rows)
+        return _df_to_csv_response(headers, data, fname)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/download-processed/<int:job_id>')
+def manual_pay_download_processed(job_id):
+    """Download processed as CSV. Query param type=cashbook|bank"""
+    try:
+        ftype = request.args.get('type', 'cashbook')
+        if ftype == 'cashbook':
+            rows = ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).all()
+            fname = f'manual_pay_processed_cashbook_job_{job_id}.csv'
+            canonical_headers = _original_headers_for(job_id, 'cashbook')
+        else:
+            rows = ManualPaymentProcessedBank.query.filter_by(job_id=job_id).all()
+            fname = f'manual_pay_unmatched_bank_job_{job_id}.csv'
+            canonical_headers = _original_headers_for(job_id, 'bank')
+        if not rows:
+            return jsonify({'success': False, 'error': 'No data'}), 404
+        # Use canonical headers from originals; fallback to union if missing
+        _, data = _collect_headers_and_rows(rows)
+        headers = canonical_headers if canonical_headers else list({k for d in data for k in d.keys()})
+        # Normalize rows to canonical header order
+        data_norm = [{k: d.get(k, '') for k in headers} for d in data]
+        return _df_to_csv_response(headers, data_norm, fname)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/download-zip/<int:job_id>')
+def manual_pay_download_zip(job_id):
+    import io, zipfile, csv
+    try:
+        files = []
+        for name, q, fname in (
+            ('original_cashbook', ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id), f'original_cashbook_job_{job_id}.csv'),
+            ('original_bank', ManualPaymentOriginalBank.query.filter_by(job_id=job_id), f'original_bank_job_{job_id}.csv'),
+            ('processed_cashbook', ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id), f'processed_cashbook_job_{job_id}.csv'),
+            ('unmatched_bank', ManualPaymentProcessedBank.query.filter_by(job_id=job_id), f'unmatched_bank_job_{job_id}.csv'),
+        ):
+            rows = q.all()
+            if not rows:
+                continue
+            headers, data = _collect_headers_and_rows(rows)
+            s = io.StringIO()
+            w = csv.DictWriter(s, fieldnames=headers, extrasaction='ignore')
+            w.writeheader()
+            for r in data:
+                w.writerow({k: r.get(k, '') for k in headers})
+            files.append((fname, s.getvalue().encode('cp1252', errors='replace')))
+
+        if not files:
+            return jsonify({'success': False, 'error': 'No data to download'}), 404
+
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for fname, content in files:
+                zf.writestr(fname, content)
+        memory_file.seek(0)
+        return send_file(memory_file, mimetype='application/zip', as_attachment=True,
+                         download_name=f'manual_pay_job_{job_id}.zip')
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/manual-pay/data/<int:job_id>')
+def manual_pay_data(job_id):
+    """Return a small sample of rows with headers for quick inspection.
+    Query param type=cashbook|bank|processed_cashbook|processed_bank&limit=5
+    """
+    try:
+        ftype = request.args.get('type', 'cashbook')
+        limit = int(request.args.get('limit', 5))
+        if ftype == 'cashbook':
+            q = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).limit(limit)
+        elif ftype == 'bank':
+            q = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).limit(limit)
+        elif ftype == 'processed_cashbook':
+            q = ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).limit(limit)
+        elif ftype == 'processed_bank':
+            q = ManualPaymentProcessedBank.query.filter_by(job_id=job_id).limit(limit)
+        else:
+            return jsonify({'success': False, 'error': 'Invalid type'}), 400
+
+        rows = q.all()
+        if not rows:
+            return jsonify({'success': True, 'headers': [], 'rows': []})
+        # Build headers union (in order of first row then additions)
+        data = [json.loads(r.row_json) for r in rows]
+        headers = []
+        seen = set()
+        for d in data:
+            for k in d.keys():
+                if k not in seen:
+                    seen.add(k)
+                    headers.append(k)
+        # Normalize rows to headers order
+        norm_rows = [{k: d.get(k, '') for k in headers} for d in data]
+        return jsonify({'success': True, 'headers': headers, 'rows': norm_rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/manual-pay/view/<int:job_id>/<string:kind>')
+def manual_pay_view(job_id, kind):
+    """Render a simple table view for processed datasets or matches."""
+    try:
+        if kind in ('processed_cashbook', 'processed_bank', 'cashbook', 'bank'):
+            # reuse data API for simplicity
+            type_map = {
+                'processed_cashbook': 'processed_cashbook',
+                'processed_bank': 'processed_bank',
+                'cashbook': 'cashbook',
+                'bank': 'bank',
+            }
+            ftype = type_map[kind]
+            # fetch more rows for viewing
+            q = request.args.get('limit', '200')
+            # build dataset
+            if ftype == 'processed_cashbook':
+                rows = ManualPaymentProcessedCashbook.query.filter_by(job_id=job_id).limit(int(q)).all()
+            elif ftype == 'processed_bank':
+                rows = ManualPaymentProcessedBank.query.filter_by(job_id=job_id).limit(int(q)).all()
+            elif ftype == 'cashbook':
+                rows = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).limit(int(q)).all()
+            else:
+                rows = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).limit(int(q)).all()
+            data = [json.loads(r.row_json) for r in rows]
+            headers = []
+            seen = set()
+            for d in data:
+                for k in d.keys():
+                    if k not in seen:
+                        seen.add(k)
+                        headers.append(k)
+            return render_template('manual_payment_view.html', title=kind.replace('_',' ').title(), headers=headers, rows=data)
+
+        if kind == 'matches':
+            # build matches by joining originals on computed key using current rules
+            import pandas as pd
+            cb_rows = ManualPaymentOriginalCashbook.query.filter_by(job_id=job_id).all()
+            bs_rows = ManualPaymentOriginalBank.query.filter_by(job_id=job_id).all()
+            cb = pd.DataFrame([json.loads(r.row_json) for r in cb_rows])
+            bs = pd.DataFrame([json.loads(r.row_json) for r in bs_rows])
+            if cb.empty or bs.empty:
+                return render_template('manual_payment_view.html', title='Matches', headers=[], rows=[])
+
+            # Use same detection as process
+            import re
+            def normalize(name: str) -> str:
+                return re.sub(r'[^a-z0-9]', '', str(name).lower())
+            def build_colmap(df):
+                return {normalize(c): c for c in df.columns}
+            def find_col(df, candidates):
+                colmap = build_colmap(df)
+                for cand in candidates:
+                    key = normalize(cand)
+                    if key in colmap:
+                        return colmap[key]
+                return None
+
+            cb_date = cb.columns[cb.columns.isin(['payment_date'])].tolist()
+            cb_date = cb_date[0] if cb_date else find_col(cb, ['Payment Date','payment_date','Date'])
+            cb_amt = cb.columns[cb.columns.isin(['amount'])].tolist()
+            cb_amt = cb_amt[0] if cb_amt else find_col(cb, ['Amount','amount'])
+            cb_client = cb.columns[cb.columns.isin(['client_id'])].tolist()
+            cb_client = cb_client[0] if cb_client else find_col(cb, ['Client ID','client_id','Client Number'])
+            bs_date = bs.columns[bs.columns.isin(['Date (MM/DD/YYYY)'])].tolist()
+            bs_date = bs_date[0] if bs_date else find_col(bs, ['Date','Transaction Date'])
+            bs_amt = bs.columns[bs.columns.isin(['Amount'])].tolist()
+            bs_amt = bs_amt[0] if bs_amt else find_col(bs, ['Amount','amount'])
+            bs_client = bs.columns[bs.columns.isin(['NS Customer Name'])].tolist()
+            bs_client = bs_client[0] if bs_client else find_col(bs, ['Client Number','Client ID'])
+
+            # Build keys (prefer client)
+            def to_float_series(series):
+                return series.apply(lambda x: float(str(x).replace(',','').replace('£','').replace('$','').replace('€','').strip() or 0))
+            if cb_client is not None and bs_client is not None:
+                cb['_key'] = cb[cb_client].astype(str).str.strip() + '|' + to_float_series(cb[cb_amt]).round(2).astype(str)
+                bs['_key'] = bs[bs_client].astype(str).str.strip() + '|' + to_float_series(bs[bs_amt]).round(2).astype(str)
+            else:
+                cb['_key'] = pd.to_datetime(cb[cb_date], errors='coerce').dt.strftime('%Y-%m-%d') + '|' + to_float_series(cb[cb_amt]).round(2).astype(str)
+                bs['_key'] = pd.to_datetime(bs[bs_date], errors='coerce').dt.strftime('%Y-%m-%d') + '|' + to_float_series(bs[bs_amt]).round(2).astype(str)
+
+            merged = pd.merge(cb, bs, how='inner', on='_key', suffixes=('_cashbook','_bank'))
+            # Build a concise view with key columns
+            view_cols = []
+            def addcols(cols):
+                for c in cols:
+                    if c and c not in view_cols:
+                        view_cols.append(c)
+            addcols([cb_client, cb_amt, cb_date])
+            addcols([bs_client, bs_amt, bs_date])
+            view = merged[[c for c in view_cols if c in merged.columns]].head(200)
+            headers = list(view.columns)
+            rows = view.fillna("").to_dict(orient='records')
+            return render_template('manual_payment_view.html', title='Matches', headers=headers, rows=rows)
+
+        return jsonify({'success': False, 'error': 'Invalid kind'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/looker-cashbook-upload/<int:job_id>', methods=['POST'])
 def upload_looker_cashbook_excel(job_id):
@@ -349,7 +1859,7 @@ def upload_looker_cashbook_excel(job_id):
                     exchange_rate=int(row.get('Exchange Rate')) if pd.notna(row.get('Exchange Rate')) else None,
                     amount=float(row.get('Amount', 0)) if pd.notna(row.get('Amount')) else None,
                     account=str(row.get('Account', '')),
-                    location=str(row.get('Location', '')),
+                    location=str(row.get('Location') or row.get('location') or ''),
                     transtype=str(row.get('Transtype', '')),
                     comment=str(row.get('Comment', '')),
                     reasoncode=int(row.get('Reasoncode')) if pd.notna(row.get('Reasoncode')) else None,
@@ -1296,7 +2806,7 @@ def upload_cashbook_excel(job_id, subsidiary_id):
                     exchange_rate=float(row.get('exchange_rate', 0)) if pd.notna(row.get('exchange_rate')) else None,
                     amount=float(row.get('amount', 0)) if pd.notna(row.get('amount')) else None,
                     account=str(row.get('account', '')),
-                    location=str(row.get('Location', '')),
+                    location=str(row.get('Location') or row.get('location') or ''),
                     transtype=str(row.get('transtype', '')),
                     comment=str(row.get('comment', '')),
                     card_reference=float(row.get('Card Reference', 0)) if pd.notna(row.get('Card Reference')) else None,

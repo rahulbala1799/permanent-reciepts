@@ -309,7 +309,7 @@
                                         <tr>
                                             <td class="ps-4">Refunds (Negative Amounts)</td>
                                             <td class="text-center" id="summary-refunds-count">-</td>
-                                            <td class="text-end" id="summary-refunds-amount">$0.00</td>
+                                            <td class="text-end" id="summary-refunds-amount" title="Source: GET /api/get-financial-summary (data.splits.refunds.total)">$0.00</td>
                                         </tr>
                                         <tr>
                                             <td class="ps-4">POA Transactions</td>
@@ -760,9 +760,17 @@
         });
 
         function loadReconciliationSummary() {
+            console.log('[DEBUG] Starting loadReconciliationSummary for job', jobId, 'subsidiary', subsidiaryId);
             fetch(`/api/matched-transactions-results/${jobId}/${subsidiaryId}`)
-                .then(response => response.json())
-                .then(data => {
+                .then(async response => {
+                    console.log('[DEBUG] Response status:', response.status);
+                    const data = await response.json();
+                    console.log('[DEBUG] Response data:', data);
+                    if (!response.ok || data.error) {
+                        console.warn('Matched results unavailable:', data.error || response.status);
+                        loadFinancialSummary();
+                        return;
+                    }
                     // Update master file count
                     const totalMatches = data.summary.total_matched;
                     document.getElementById('master-file-count').textContent = `${totalMatches} matched transactions`;
@@ -815,6 +823,7 @@
                 })
                 .catch(error => {
                     console.error('Error loading reconciliation summary:', error);
+                    loadFinancialSummary();
                 });
         }
 
@@ -880,10 +889,27 @@
             window.location.href = `/api/download-individual-split/${jobId}/${subsidiaryId}/${splitType}${memoParam}`;
         }
 
-        function loadFinancialSummary() {
-            fetch(`/api/get-financial-summary/${jobId}/${subsidiaryId}`)
-                .then(response => response.json())
-                .then(data => {
+        async function loadFinancialSummary() {
+            try {
+            const summaryUrl = `/api/get-financial-summary/${jobId}/${subsidiaryId}`;
+            console.log('[Complete Reconciliation Summary] Request: GET', summaryUrl, '| jobId=', jobId, 'subsidiaryId=', subsidiaryId);
+            const [summaryResp, pfrStateResp] = await Promise.all([
+                fetch(summaryUrl),
+                fetch(`/api/stripe-automation/state/${jobId}`)
+            ]);
+            const data = await summaryResp.json();
+            if (!summaryResp.ok || data.error) {
+                console.warn('Financial summary unavailable:', data.error || summaryResp.status);
+                const calc = document.getElementById('calculation-display');
+                if (calc) calc.textContent = 'No reconciliation results yet. Run Processes 1–3.';
+                return;
+            }
+            // Trace: where "Refunds (Negative Amounts)" row gets its value
+            const refundsTotal = data.splits && data.splits.refunds ? data.splits.refunds.total : undefined;
+            console.log('[Complete Reconciliation Summary] Response splits.refunds:', data.splits && data.splits.refunds ? data.splits.refunds : 'N/A', '| Refunds total (raw):', refundsTotal);
+            let pfrState = { success: false, pfr_coli_fees_total: 0 };
+            try { pfrState = await pfrStateResp.json(); } catch (e) { pfrState = { success: false, pfr_coli_fees_total: 0 }; }
+            const pfrExtraFees = Number(pfrState && pfrState.success ? (pfrState.pfr_coli_fees_total || 0) : 0);
                     // Format currency
                     const fmt = (num) => {
                         return new Intl.NumberFormat('en-US', {
@@ -894,7 +920,7 @@
                         }).format(num);
                     };
                     
-                    // Populate split journals
+                    // Populate split journals (Refunds row = data.splits.refunds from get-financial-summary API)
                     document.getElementById('summary-refunds-count').textContent = data.splits.refunds.count;
                     document.getElementById('summary-refunds-amount').textContent = fmt(data.splits.refunds.total);
                     document.getElementById('summary-poa-count').textContent = data.splits.poa.count;
@@ -941,13 +967,15 @@
                     document.getElementById('summary-unmatched-refunds-count').textContent = data.unmatched_refunds.count;
                     document.getElementById('summary-unmatched-refunds-amount').textContent = fmt(data.unmatched_refunds.total);
                     
-                    // Fees
+                    // Fees (add PFR COL I fees to Column I and Total Fees)
+                    const colIWithPfr = Number(data.fees.col_i_fees.total) + pfrExtraFees;
+                    const totalFeesWithPfr = Number(data.fees.total) + pfrExtraFees;
                     document.getElementById('summary-col-i-fees-count').textContent = data.fees.col_i_fees.count;
-                    document.getElementById('summary-col-i-fees-amount').textContent = fmt(data.fees.col_i_fees.total);
+                    document.getElementById('summary-col-i-fees-amount').textContent = fmt(colIWithPfr);
                     document.getElementById('summary-type-fees-count').textContent = data.fees.type_fees.count;
                     document.getElementById('summary-type-fees-amount').textContent = fmt(data.fees.type_fees.total);
                     document.getElementById('summary-total-fees-count').textContent = data.fees.total_count;
-                    document.getElementById('summary-total-fees-amount').textContent = fmt(data.fees.total);
+                    document.getElementById('summary-total-fees-amount').textContent = fmt(totalFeesWithPfr);
                     
                     // Payment Failure Refunds
                     document.getElementById('summary-pfr-count').textContent = data.pfr.count;
@@ -960,12 +988,13 @@
                         document.getElementById('summary-other-amount').textContent = fmt(data.other.total);
                     }
                     
-                    // Final total
+                    // Final total (decrease by PFR extra fees included in Column I)
                     document.getElementById('summary-final-count').textContent = data.final.count;
-                    document.getElementById('summary-final-amount').textContent = fmt(data.final.total);
+                    const adjustedFinal = Number(data.final.total) - pfrExtraFees;
+                    document.getElementById('summary-final-amount').textContent = fmt(adjustedFinal);
                     
                     // Calculation display
-                    const calcDisplay = `${fmt(data.splits.subtotal)} + ${fmt(data.unmatched_refunds.total)} - ${fmt(data.fees.total)} + ${fmt(data.pfr.total)} + ${fmt(data.other.total)} = ${fmt(data.final.total)}`;
+                    const calcDisplay = `${fmt(data.splits.subtotal)} + ${fmt(data.unmatched_refunds.total)} - ${fmt(totalFeesWithPfr)} + ${fmt(data.pfr.total)} + ${fmt(data.other.total)} = ${fmt(adjustedFinal)}`;
                     document.getElementById('calculation-display').innerHTML = `<strong>${calcDisplay}</strong>`;
                     
                     // Validation display
@@ -978,9 +1007,11 @@
                         // Show validation section
                         validationAlert.style.display = 'block';
                         
-                        // Populate values
-                        document.getElementById('validation-stripe-net').textContent = fmt(data.validation.total_stripe_net);
-                        document.getElementById('validation-calculated').textContent = fmt(data.validation.calculated_total);
+                        // Populate values (subtract PFR fees from Stripe Net display)
+                        const adjustedStripeNet = Number(data.validation.total_stripe_net) - pfrExtraFees;
+                        const adjustedCalculated = Number(data.validation.calculated_total) - pfrExtraFees;
+                        document.getElementById('validation-stripe-net').textContent = fmt(adjustedStripeNet);
+                        document.getElementById('validation-calculated').textContent = fmt(adjustedCalculated);
                         document.getElementById('validation-variance').textContent = fmt(data.validation.variance);
                         
                         // Populate breakdown
@@ -990,7 +1021,7 @@
                             document.getElementById('breakdown-pfr').textContent = fmt(data.validation.breakdown.pfr_net);
                             document.getElementById('breakdown-pfr-count').textContent = data.validation.breakdown.pfr_count;
                             document.getElementById('breakdown-other').textContent = fmt(data.validation.breakdown.other_transactions_net);
-                            document.getElementById('validation-stripe-net-breakdown').textContent = fmt(data.validation.total_stripe_net);
+                            document.getElementById('validation-stripe-net-breakdown').textContent = fmt(adjustedStripeNet);
                         }
                         
                         // Set status based on match
@@ -1008,10 +1039,11 @@
                             validationMessage.innerHTML = `<strong class="text-warning">Variance of ${fmt(Math.abs(data.validation.variance))}</strong> detected. Please review the reconciliation process.`;
                         }
                     }
-                })
-                .catch(error => {
-                    console.error('Error loading financial summary:', error);
-                });
+            } catch (error) {
+                console.error('Error loading financial summary:', error);
+                const calc = document.getElementById('calculation-display');
+                if (calc) calc.textContent = 'No reconciliation results yet. Run Processes 1-3.';
+            }
         }
 
         function preparePerfectMatchesJournal() {
