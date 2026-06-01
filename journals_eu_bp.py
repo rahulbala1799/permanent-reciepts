@@ -112,8 +112,10 @@ def upload_journals(job_id):
         rows = payload.get('rows', [])
         
         # Valid EU journal types
-        valid_types = ['Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU',
-                      'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED']
+        valid_types = [
+            'Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Refunds_Cross_Subsidiary_EU',
+            'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED', 'Refunds_Cross_Subsidiary_AED',
+        ]
         
         if journal_type not in valid_types:
             return jsonify({'success': False, 'error': f'Invalid journal_type: {journal_type}'}), 400
@@ -765,8 +767,10 @@ def journals_upload_status(job_id):
         
         dataset = FPDatasetEU.query.filter_by(job_id=job_id).first()
         
-        journal_types = ['Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU',
-                        'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED']
+        journal_types = [
+            'Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Refunds_Cross_Subsidiary_EU',
+            'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED', 'Refunds_Cross_Subsidiary_AED',
+        ]
         
         if not dataset:
             return jsonify({

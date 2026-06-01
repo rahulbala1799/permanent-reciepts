@@ -152,8 +152,11 @@ function navigateToReceipts() {
 }
 
 function navigateToJobs() {
-    // For now, show an alert - can be implemented later
-    alert('Processing Jobs page coming soon!');
+    window.location.href = '/receipts';
+}
+
+function navigateToClientRegions() {
+    window.location.href = '/client-regions';
 }
 
 function navigateToSettings() {

@@ -1,0 +1,14 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('index') }}">Receipts Automation</a>
+        <div class="navbar-nav ms-auto align-items-lg-center">
+            <a class="nav-link{% if nav_active == 'dashboard' %} active{% endif %}" href="{{ url_for('index') }}">Dashboard</a>
+            <a class="nav-link{% if nav_active == 'receipts' %} active{% endif %}" href="{{ url_for('receipts_page') }}">Reconciliation Jobs</a>
+            <a class="nav-link{% if nav_active == 'client_regions' %} active{% endif %}" href="{{ url_for('client_regions_page') }}">Client Regions</a>
+            {% for link in nav_extra_links or [] %}
+            <a class="nav-link{% if link.active %} active{% endif %}" href="{{ link.href }}"
+               {% if link.onclick %}onclick="{{ link.onclick }}"{% endif %}>{{ link.label }}</a>
+            {% endfor %}
+        </div>
+    </div>
+</nav>

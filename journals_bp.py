@@ -1090,8 +1090,8 @@ def upload_journals(job_id, subsidiary_id):
         # Valid journal types (includes EU-specific types)
         valid_types = [
             'Main', 'POA', 'Cross_Subsidiary',  # Non-EU
-            'Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU',  # EU EUR
-            'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED'  # EU AED
+            'Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Refunds_Cross_Subsidiary_EU',
+            'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED', 'Refunds_Cross_Subsidiary_AED',
         ]
         
         if journal_type not in valid_types:
@@ -1164,8 +1164,10 @@ def journals_upload_status(job_id, subsidiary_id):
         
         # Determine expected journal types based on subsidiary
         if subsidiary_id == 4:  # EU
-            journal_types = ['Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 
-                           'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED']
+            journal_types = [
+                'Main_EU', 'POA_EU', 'Cross_Subsidiary_EU', 'Refunds_EU', 'Refunds_Cross_Subsidiary_EU',
+                'Main_AED', 'POA_AED', 'Cross_Subsidiary_AED', 'Refunds_AED', 'Refunds_Cross_Subsidiary_AED',
+            ]
         else:  # Non-EU
             journal_types = ['Main', 'POA', 'Cross_Subsidiary']
         

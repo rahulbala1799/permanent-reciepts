@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Region Map - Receipts Automation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        .region-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; margin: 1px; }
+        .region-AU { background: #d1ecf1; color: #0c5460; }
+        .region-CA { background: #f8d7da; color: #721c24; }
+        .region-US { background: #cce5ff; color: #004085; }
+        .region-EU { background: #fff3cd; color: #856404; }
+        .region-UK { background: #e2e3e5; color: #383d41; }
+        tr.multi-region { background: #fff8e6; }
+        tr.clickable-row { cursor: pointer; }
+        tr.clickable-row:hover { background: #f0f4ff; }
+        .stat-card { border-left: 4px solid #0d6efd; }
+        .stat-card.multi { border-left-color: #fd7e14; }
+        .billing-truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+    </style>
+</head>
+<body>
+{% set nav_active = 'client_regions' %}
+{% include 'partials/navbar.html' %}
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+        <div>
+            <h1><i class="fas fa-globe-americas text-primary"></i> Client Region Map</h1>
+            <p class="lead mb-0 text-muted">Which Stripe region each customer matched under in past reconciliations</p>
+            <small class="text-muted">Source: matched transactions only — not raw cashbook uploads</small>
+        </div>
+        <button class="btn btn-primary" id="btn-rebuild" onclick="rebuildMap()">
+            <i class="fas fa-sync-alt"></i> Rebuild from database
+        </button>
+    </div>
+
+    <div class="row g-3 mb-4" id="stats-row">
+        <div class="col-md-3 col-6">
+            <div class="card stat-card h-100"><div class="card-body">
+                <div class="text-muted small">Total clients</div>
+                <div class="h3 mb-0" id="stat-total">—</div>
+            </div></div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card stat-card multi h-100"><div class="card-body">
+                <div class="text-muted small">Multi-region</div>
+                <div class="h3 mb-0 text-warning" id="stat-multi">—</div>
+            </div></div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100"><div class="card-body py-2">
+                <div class="text-muted small mb-1">By primary region</div>
+                <div id="stat-regions" class="d-flex flex-wrap gap-2">—</div>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small">Search client ID</label>
+                    <input type="text" class="form-control" id="filter-q" placeholder="e.g. 46005" onkeydown="if(event.key==='Enter')loadClients(1)">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small">Primary region</label>
+                    <select class="form-select" id="filter-region" onchange="loadClients(1)">
+                        <option value="">All regions</option>
+                        <option value="1">AU</option>
+                        <option value="2">CA</option>
+                        <option value="3">US</option>
+                        <option value="4">EU</option>
+                        <option value="5">UK</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check mt-4">
+                        <input class="form-check-input" type="checkbox" id="filter-multi" onchange="loadClients(1)">
+                        <label class="form-check-label" for="filter-multi">Multi-region only</label>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-primary w-100" onclick="loadClients(1)"><i class="fas fa-search"></i> Search</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Client ID</th>
+                            <th>Primary</th>
+                            <th>All regions</th>
+                            <th>Multi</th>
+                            <th>Last job</th>
+                            <th>Billing entity</th>
+                            <th class="text-end">Matches</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clients-tbody">
+                        <tr><td colspan="7" class="text-center text-muted py-4">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center">
+            <small class="text-muted" id="page-info">—</small>
+            <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" id="btn-prev" onclick="changePage(-1)" disabled>Prev</button>
+                <button class="btn btn-outline-secondary" id="btn-next" onclick="changePage(1)" disabled>Next</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- History modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Client <span id="modal-client-id"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="modal-profile" class="mb-3"></div>
+                <h6>Match history by job</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead><tr>
+                            <th>Job</th><th>Region</th><th>Matches</th><th>Stripe total</th><th>Match types</th><th>Billing entity</th>
+                        </tr></thead>
+                        <tbody id="modal-history-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let currentPage = 1;
+let totalPages = 1;
+const historyModal = new bootstrap.Modal(document.getElementById('historyModal'));
+
+function regionChips(regions) {
+    return (regions || []).map(r =>
+        `<span class="region-chip region-${r}">${r}</span>`
+    ).join('');
+}
+
+function loadStats() {
+    fetch('/api/client-regions/stats')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) return;
+            document.getElementById('stat-total').textContent = d.total_clients.toLocaleString();
+            document.getElementById('stat-multi').textContent = d.multi_region_clients.toLocaleString();
+            const el = document.getElementById('stat-regions');
+            el.innerHTML = Object.entries(d.by_primary_region || {}).map(([k, v]) =>
+                `<span class="region-chip region-${k}">${k}: ${v.toLocaleString()}</span>`
+            ).join('');
+        });
+}
+
+function loadClients(page) {
+    currentPage = page;
+    const q = document.getElementById('filter-q').value.trim();
+    const region = document.getElementById('filter-region').value;
+    const multi = document.getElementById('filter-multi').checked;
+    const params = new URLSearchParams({ page, per_page: 50 });
+    if (q) params.set('q', q);
+    if (region) params.set('subsidiary_id', region);
+    if (multi) params.set('multi_only', '1');
+
+    document.getElementById('clients-tbody').innerHTML =
+        '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>';
+
+    fetch('/api/client-regions?' + params)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) throw new Error(d.error || 'Failed');
+            totalPages = d.pages || 1;
+            const tbody = document.getElementById('clients-tbody');
+            if (!d.items.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No clients found. Try Rebuild from database.</td></tr>';
+            } else {
+                tbody.innerHTML = d.items.map(item => `
+                    <tr class="clickable-row${item.is_multi_region ? ' multi-region' : ''}" onclick="showHistory('${item.client_id}')">
+                        <td><strong>${item.client_id}</strong></td>
+                        <td>${regionChips([item.primary_region])}</td>
+                        <td>${regionChips(item.regions)}</td>
+                        <td>${item.is_multi_region ? '<span class="badge bg-warning text-dark">2+ regions</span>' : '—'}</td>
+                        <td>${item.last_job_name || '—'}</td>
+                        <td><span class="billing-truncate" title="${(item.last_billing_entity||'').replace(/"/g,'')}">${item.last_billing_entity || '—'}</span></td>
+                        <td class="text-end">${item.total_matches}</td>
+                    </tr>
+                `).join('');
+            }
+            document.getElementById('page-info').textContent =
+                `Page ${d.page} of ${d.pages} · ${d.total.toLocaleString()} clients`;
+            document.getElementById('btn-prev').disabled = d.page <= 1;
+            document.getElementById('btn-next').disabled = d.page >= d.pages;
+        })
+        .catch(e => {
+            document.getElementById('clients-tbody').innerHTML =
+                `<tr><td colspan="7" class="text-center text-danger py-4">${e.message}</td></tr>`;
+        });
+}
+
+function changePage(delta) {
+    const p = currentPage + delta;
+    if (p >= 1 && p <= totalPages) loadClients(p);
+}
+
+function showHistory(clientId) {
+    document.getElementById('modal-client-id').textContent = clientId;
+    document.getElementById('modal-profile').innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
+    document.getElementById('modal-history-tbody').innerHTML = '';
+    historyModal.show();
+
+    fetch('/api/client-regions/' + encodeURIComponent(clientId) + '/history')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) throw new Error(d.error);
+            const p = d.profile;
+            if (p) {
+                document.getElementById('modal-profile').innerHTML = `
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <span>Primary: ${regionChips([p.primary_region])}</span>
+                        <span>All: ${regionChips(p.regions)}</span>
+                        ${p.is_multi_region ? '<span class="badge bg-warning text-dark">Multi-region</span>' : ''}
+                        <span class="text-muted">${p.total_matches} total matches</span>
+                    </div>`;
+            } else {
+                document.getElementById('modal-profile').innerHTML = '';
+            }
+            document.getElementById('modal-history-tbody').innerHTML = d.history.map(h => {
+                const types = Object.entries(h.match_types || {}).map(([k,v]) => `${k} (${v})`).join(', ');
+                return `<tr>
+                    <td>${h.job_name}</td>
+                    <td>${regionChips([h.region])}</td>
+                    <td>${h.match_count}</td>
+                    <td>${h.total_stripe_amount != null ? h.total_stripe_amount.toLocaleString(undefined,{minimumFractionDigits:2}) : '—'}</td>
+                    <td><small>${types || '—'}</small></td>
+                    <td><small>${h.billing_entity || '—'}</small></td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="6" class="text-muted">No history</td></tr>';
+        })
+        .catch(e => {
+            document.getElementById('modal-profile').innerHTML = `<div class="text-danger">${e.message}</div>`;
+        });
+}
+
+async function rebuildMap() {
+    const btn = document.getElementById('btn-rebuild');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Rebuilding…';
+    try {
+        const res = await fetch('/api/client-regions/rebuild', { method: 'POST' });
+        const d = await res.json();
+        if (!d.success) throw new Error(d.error || 'Rebuild failed');
+        const r = d.result;
+        alert(`Rebuild complete.\n\nClients: ${r.clients.toLocaleString()}\nHistory rows: ${r.history_rows.toLocaleString()}\nMulti-region: ${r.multi_region_clients}\nSkipped summit: ${r.skipped_summit_matches}`);
+        loadStats();
+        loadClients(1);
+    } catch (e) {
+        alert('Rebuild failed: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt"></i> Rebuild from database';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadClients(1);
+});
+</script>
+</body>
+</html>

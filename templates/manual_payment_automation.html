@@ -22,6 +22,9 @@
         .toolbar { display: flex; gap: 10px; align-items: center; }
         input[type="file"] { padding: 8px; }
         input[type="text"], input[type="number"], select { padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
+        .top-nav { margin-bottom: 16px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 14px; }
+        .top-nav a { color: #111; font-weight: 600; text-decoration: none; }
+        .top-nav a:hover { text-decoration: underline; }
     </style>
     <script>
         const JOB_ID = {{ job_id }};
@@ -87,6 +90,11 @@
     </script>
   </head>
   <body>
+    <nav class="top-nav">
+        <a href="/">Dashboard</a>
+        <a href="/receipts">Reconciliation Jobs</a>
+        <a href="/client-regions">Client Regions</a>
+    </nav>
     <div class="container">
         <h1>Manual Payment Automation</h1>
         <div class="sub"><span id="jobLabel" class="badge"></span></div>

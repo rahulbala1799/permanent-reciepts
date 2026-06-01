@@ -5,6 +5,7 @@ Handles AED currency transactions separately from EUR transactions
 
 import pandas as pd
 import io
+import unicodedata
 from typing import Dict, Optional
 from datetime import datetime
 import calendar
@@ -133,13 +134,18 @@ class JournalBuilderEU:
         
         # STEP 2: Process EUR transactions
         if not eur_df.empty:
-            # Check for cross-subsidiary FIRST (matches Master Upload logic)
             cross_mask_eur = eur_df['billing_entity'] != self.billing_entity
             cross_eur_df = eur_df[cross_mask_eur].copy()
             if not cross_eur_df.empty:
-                journals['Cross_Subsidiary_EU'] = cross_eur_df
+                cross_eur_refunds_df = cross_eur_df[cross_eur_df['amount'] < 0].copy()
+                cross_eur_non_refund_df = cross_eur_df[cross_eur_df['amount'] >= 0].copy()
+                if not cross_eur_non_refund_df.empty:
+                    journals['Cross_Subsidiary_EU'] = cross_eur_non_refund_df
+                if not cross_eur_refunds_df.empty:
+                    journals['Refunds_Cross_Subsidiary_EU'] = self._generate_refunds_journal(
+                        cross_eur_refunds_df, memo
+                    )
             
-            # Non-cross-subsidiary EUR transactions
             non_cross_eur_df = eur_df[~cross_mask_eur].copy()
             
             if not non_cross_eur_df.empty:
@@ -147,8 +153,7 @@ class JournalBuilderEU:
                 refunds_eur_mask = non_cross_eur_df['amount'] < 0
                 refunds_eur_df = non_cross_eur_df[refunds_eur_mask].copy()
                 if not refunds_eur_df.empty:
-                    refunds_journal = self._generate_refunds_journal(refunds_eur_df, memo)
-                    journals['Refunds_EU'] = refunds_journal
+                    journals['Refunds_EU'] = self._generate_refunds_journal(refunds_eur_df, memo)
                 
                 # Positive EUR transactions
                 positive_eur_df = non_cross_eur_df[~refunds_eur_mask].copy()
@@ -165,15 +170,20 @@ class JournalBuilderEU:
                     if not main_eur_df.empty:
                         journals['Main_EU'] = main_eur_df
         
-        # STEP 3: Process AED transactions (SAME categorization logic as EUR)
+        # STEP 3: Process AED transactions
         if not aed_df.empty:
-            # Check for cross-subsidiary FIRST
             cross_mask_aed = aed_df['billing_entity'] != self.billing_entity
             cross_aed_df = aed_df[cross_mask_aed].copy()
             if not cross_aed_df.empty:
-                journals['Cross_Subsidiary_AED'] = cross_aed_df
+                cross_aed_refunds_df = cross_aed_df[cross_aed_df['amount'] < 0].copy()
+                cross_aed_non_refund_df = cross_aed_df[cross_aed_df['amount'] >= 0].copy()
+                if not cross_aed_non_refund_df.empty:
+                    journals['Cross_Subsidiary_AED'] = cross_aed_non_refund_df
+                if not cross_aed_refunds_df.empty:
+                    rca = self._generate_refunds_journal(cross_aed_refunds_df, memo)
+                    self._attach_aed_refund_eur_total(rca, cross_aed_refunds_df)
+                    journals['Refunds_Cross_Subsidiary_AED'] = rca
             
-            # Non-cross-subsidiary AED transactions
             non_cross_aed_df = aed_df[~cross_mask_aed].copy()
             
             if not non_cross_aed_df.empty:
@@ -181,8 +191,9 @@ class JournalBuilderEU:
                 refunds_aed_mask = non_cross_aed_df['amount'] < 0
                 refunds_aed_df = non_cross_aed_df[refunds_aed_mask].copy()
                 if not refunds_aed_df.empty:
-                    refunds_aed_journal = self._generate_refunds_journal(refunds_aed_df, memo)
-                    journals['Refunds_AED'] = refunds_aed_journal
+                    raj = self._generate_refunds_journal(refunds_aed_df, memo)
+                    self._attach_aed_refund_eur_total(raj, refunds_aed_df)
+                    journals['Refunds_AED'] = raj
                 
                 # Positive AED transactions
                 positive_aed_df = non_cross_aed_df[~refunds_aed_mask].copy()
@@ -200,6 +211,15 @@ class JournalBuilderEU:
                         journals['Main_AED'] = main_aed_df
         
         return journals
+    
+    def _attach_aed_refund_eur_total(self, journal_df: pd.DataFrame, source_refunds_df: pd.DataFrame) -> None:
+        """Store EUR sum from Stripe conversion on double-entry AED refund journals (for summaries)."""
+        if journal_df.empty or source_refunds_df.empty:
+            return
+        if 'stripe_converted_amount' in source_refunds_df.columns:
+            journal_df.attrs['aed_converted_eur_total'] = float(
+                source_refunds_df['stripe_converted_amount'].fillna(0).sum()
+            )
     
     def _generate_refunds_journal(self, refunds_df: pd.DataFrame, memo: Optional[str] = None) -> pd.DataFrame:
         """
@@ -238,8 +258,8 @@ class JournalBuilderEU:
         
         total_refund_amount = abs(refunds_df['amount'].sum())
         first_refund = refunds_df.iloc[0]
-        billing_entity = first_refund['billing_entity']
         bank_account = first_refund['account']
+        cr_entity = first_refund['billing_entity']
         
         # One Dr entry per refund (same as other subsidiaries)
         for idx, row in refunds_df.iterrows():
@@ -247,7 +267,7 @@ class JournalBuilderEU:
             entry = {
                 'Date': row['payment_date'],
                 'memo': memo if memo else 'MISC PAYMENT STRIPE',
-                'Entity': billing_entity,
+                'Entity': row['billing_entity'],
                 'Name': row['client_id'],
                 'Account': '11010 Accounts Receivable : Trade Debtors',
                 'Management P&L': 'Balance Sheet',
@@ -263,7 +283,7 @@ class JournalBuilderEU:
         entry_cr = {
             'Date': eom_date,
             'memo': 'Refunds / Disputes',
-            'Entity': billing_entity,
+            'Entity': cr_entity,
             'Name': '',
             'Account': bank_account,
             'Management P&L': 'Balance Sheet',
@@ -332,15 +352,20 @@ class JournalBuilderEU:
                 
                 if is_aed_journal:
                     # AED journal - need to convert for comparison
-                    if 'stripe_converted_amount' in journal_df.columns:
+                    if 'Refunds_' in journal_name and 'Dr' in journal_df.columns:
+                        total_eur = float(journal_df.attrs.get('aed_converted_eur_total', 0) or 0)
+                    elif 'stripe_converted_amount' in journal_df.columns:
                         total_eur = float(journal_df['stripe_converted_amount'].sum())
                     else:
                         total_eur = 0
                     aed_total_aed += total
                     aed_total_eur += total_eur
                 else:
-                    # EUR journal
-                    eur_total += total
+                    # EUR journal — double-entry refunds use positive Dr sums; net EUR total must subtract them
+                    if 'Refunds_' in journal_name and 'Dr' in journal_df.columns:
+                        eur_total -= total
+                    else:
+                        eur_total += total
                     total_eur = total
                 
                 # Add to combined categories (for comparison with Master Upload)
@@ -390,18 +415,30 @@ class JournalBuilderEU:
                 'error': f'Error generating EU journals: {str(e)}'
             }
     
+    def _df_to_eu_netsuite_csv_bytes(self, df_export: pd.DataFrame) -> io.BytesIO:
+        """
+        Write UTF-8 with BOM so Ä / Ö / Ü stay as real Unicode (U+00C4 etc.).
+
+        cp1252 uses a single byte for Ä (0xC4); tools that open the CSV as UTF-8 mis-decode
+        that byte and can show the wrong glyph (e.g. ƒ). UTF-8-sig is widely accepted by
+        NetSuite/Excel when the import encoding is set to UTF-8.
+        """
+        text_buf = io.StringIO()
+        df_export.to_csv(text_buf, index=False)
+        raw = unicodedata.normalize('NFC', text_buf.getvalue())
+        data = raw.encode('utf-8-sig')
+        out = io.BytesIO(data)
+        out.seek(0)
+        return out
+    
     def export_journal_to_csv(self, df: pd.DataFrame, journal_name: str) -> io.BytesIO:
         """Export journal DataFrame to CSV BytesIO with correct format"""
-        output = io.BytesIO()
-        
         # Create a copy to avoid modifying original
         df_export = df.copy()
         
         # Refunds journals use Dr/Cr format with different columns – export as-is
         if 'Dr' in df_export.columns and 'Cr' in df_export.columns:
-            df_export.to_csv(output, index=False, encoding='utf-8')
-            output.seek(0)
-            return output
+            return self._df_to_eu_netsuite_csv_bytes(df_export)
         
         # Standard journals (Main, POA, Cross): use expected column order and preserve Location
         expected_columns = [
@@ -409,6 +446,13 @@ class JournalBuilderEU:
             'currency', 'exchange_rate', 'amount', 'account', 'Location', 'transtype',
             'comment', 'Card Reference', 'reasoncode', 'sepaprovider', 'invoice #', 'payment #', 'Memo'
         ]
+        
+        # EU master uses snake_case from MatchedTransaction; export expects cashbook headers.
+        # Without this, 'Card Reference' is added as empty and 'card_reference' is dropped.
+        if 'Card Reference' not in df_export.columns and 'card_reference' in df_export.columns:
+            df_export['Card Reference'] = df_export['card_reference']
+        if 'Memo' not in df_export.columns and 'memo' in df_export.columns:
+            df_export['Memo'] = df_export['memo']
         
         # Preserve Location: use 'Location' if present, else copy from 'location' (EU column naming)
         if 'Location' not in df_export.columns and 'location' in df_export.columns:
@@ -437,10 +481,7 @@ class JournalBuilderEU:
         # Select only the expected columns in the correct order
         df_export = df_export[expected_columns]
         
-        # Export to CSV
-        df_export.to_csv(output, index=False, encoding='utf-8')
-        output.seek(0)
-        return output
+        return self._df_to_eu_netsuite_csv_bytes(df_export)
     
     def export_all_journals(self, memo: Optional[str] = None) -> Dict[str, io.BytesIO]:
         """

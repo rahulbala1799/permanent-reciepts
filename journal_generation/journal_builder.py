@@ -466,10 +466,9 @@ class JournalBuilder:
         # Calculate total refund amount (sum of all negative amounts)
         total_refund_amount = abs(refunds_df['amount'].sum())
         
-        # Get billing entity and bank account from first refund
         first_refund = refunds_df.iloc[0]
-        billing_entity = first_refund['billing_entity']
         bank_account = first_refund['account']
+        cr_entity = first_refund['billing_entity']
         
         # Process each refund transaction (individual Dr entries)
         for idx, row in refunds_df.iterrows():
@@ -479,7 +478,7 @@ class JournalBuilder:
             entry = {
                 'Date': row['payment_date'],
                 'memo': memo if memo else 'MISC PAYMENT STRIPE',
-                'Entity': billing_entity,
+                'Entity': row['billing_entity'],
                 'Name': row['client_id'],
                 'Account': '11010 Accounts Receivable : Trade Debtors',
                 'Management P&L': 'Balance Sheet',
@@ -495,7 +494,7 @@ class JournalBuilder:
         entry_cr = {
             'Date': eom_date,
             'memo': 'Refunds / Disputes',
-            'Entity': billing_entity,
+            'Entity': cr_entity,
             'Name': '',
             'Account': bank_account,
             'Management P&L': 'Balance Sheet',

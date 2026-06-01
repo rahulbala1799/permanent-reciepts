@@ -13,19 +13,11 @@
         <!-- Header -->
         <div class="row">
             <div class="col-12">
-                <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-                    <div class="container-fluid">
-                        <a class="navbar-brand" href="/">
-                            <i class="fas fa-receipt"></i> Permanent Receipts
-                        </a>
-                        <div class="navbar-nav ms-auto">
-                            <a class="nav-link" href="/receipts">
-                                <i class="fas fa-list"></i> All Jobs
-                            </a>
-                        </div>
-                    </div>
-                </nav>
-            </div>
+{% set nav_active = 'receipts' %}
+{% set nav_extra_links = [] %}
+{% include 'partials/navbar.html' %}
+
+</div>
         </div>
 
         <!-- Main Content -->
@@ -459,7 +451,8 @@
                                     <ul class="mb-0">
                                         <li><strong>Main Journal:</strong> Regular transactions (simple format)</li>
                                         <li><strong>POA Journal:</strong> POA transactions (simple format)</li>
-                                        <li><strong>Refunds Journal:</strong> Refunds in double-entry Dr/Cr accounting format</li>
+                                        <li><strong>Refunds Journal:</strong> Non–cross-subsidiary refunds in double-entry Dr/Cr format (Region from cashbook Location)</li>
+                                        <li><strong>Cross-Subsidiary Refunds:</strong> Cross-subsidiary negative amounts in the same double-entry format</li>
                                     </ul>
                                 </div>
                             
@@ -1770,7 +1763,10 @@
                 let currency = isAED ? 'AED' : 'EUR';
                 let currencySymbol = isAED ? '' : '€';
                 
-                if (journalName.includes('Refunds')) {
+                if (journalName.includes('Refunds_Cross_Subsidiary')) {
+                    displayName = '💰 Cross-Subsidiary Refunds (Double-Entry)';
+                    badgeClass = 'bg-danger';
+                } else if (journalName.includes('Refunds')) {
                     displayName = '💰 Refunds Journal (Double-Entry)';
                     badgeClass = 'bg-danger';
                 } else if (journalName.includes('POA')) {
@@ -1791,36 +1787,31 @@
                     displayName += ' <span class="badge bg-secondary ms-2">EUR</span>';
                 }
                 
-                // Calculate EUR equivalent for AED journals
+                // Double-entry refund journals store positive Dr sums; show and net as negative (incl. Cross-Subsidiary Refunds)
+                const isRefundJrnl = journalName.includes('Refunds');
+                const signedNative = isRefundJrnl ? -Math.abs(Number(info.total) || 0) : Number(info.total) || 0;
+                
                 let eurEquivalent = '';
                 let eurAmount = 0;
                 if (isAED && reconciliation.aed_journals_total_aed > 0) {
-                    // Calculate individual AED journal's EUR equivalent
-                    // Using the ratio from total AED/EUR conversion
                     const conversionRate = reconciliation.aed_journals_total_eur / reconciliation.aed_journals_total_aed;
-                    eurAmount = info.total * conversionRate;
+                    eurAmount = signedNative * conversionRate;
                     eurEquivalent = `€${eurAmount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
                 } else {
-                    eurAmount = info.total;
-                    eurEquivalent = `${currencySymbol}${info.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+                    eurAmount = signedNative;
+                    eurEquivalent = `${currencySymbol}${signedNative.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
                 }
                 
-                // Add to totals
                 totalTransactions += info.count;
                 if (isAED) {
-                    totalAmountAED += info.total;
+                    totalAmountAED += signedNative;
                 }
-                // Refunds should be subtracted (they're positive in Dr/Cr format but represent negative transactions)
-                if (journalName.includes('Refunds')) {
-                    totalAmountEUR -= eurAmount;
-                } else {
-                    totalAmountEUR += eurAmount;
-                }
+                totalAmountEUR += eurAmount;
                 
                 row.innerHTML = `
                     <td><span class="badge ${badgeClass}">${displayName}</span></td>
                     <td class="text-center">${info.count}</td>
-                    <td class="text-end">${currencySymbol}${info.total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}</td>
+                    <td class="text-end">${currencySymbol}${signedNative.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}</td>
                     <td class="text-end">${eurEquivalent}</td>
                     <td class="text-center">
                         <button class="btn btn-sm btn-outline-primary" onclick="downloadIndividualJournal('${journalName}')">

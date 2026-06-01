@@ -61,6 +61,8 @@ from models import create_models
     PartnerTransfer,
     PartnerTransferIn,
     PartnerTransferOut,
+    ClientRegionHistory,
+    ClientRegionProfile,
 ) = create_models(db)
 
 # Register Journals Processing Blueprint
@@ -114,6 +116,14 @@ globals()['ManualPaymentOriginalBank'] = ManualPaymentOriginalBank
 globals()['ManualPaymentProcessedCashbook'] = ManualPaymentProcessedCashbook
 globals()['ManualPaymentProcessedBank'] = ManualPaymentProcessedBank
 globals()['ManualPaymentState'] = ManualPaymentState
+globals()['ClientRegionHistory'] = ClientRegionHistory
+globals()['ClientRegionProfile'] = ClientRegionProfile
+
+from client_region_service import (
+    SUBSIDIARY_LABELS,
+    rebuild_client_regions,
+    profile_to_api_dict,
+)
 
 # Ensure all tables exist (including newly added state tables)
 with app.app_context():
@@ -154,8 +164,135 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
-        'database': db_status
+        'database': db_status,
+        'client_regions_built': ClientRegionProfile.query.count() > 0,
+        'client_regions_count': ClientRegionProfile.query.count(),
     })
+
+
+def _job_name_map():
+    jobs = ProcessingJob.query.all()
+    return {j.id: j.job_name for j in jobs}
+
+
+@app.route('/client-regions')
+def client_regions_page():
+    """Client region mapping UI (from Stripe-matched reconciliations)."""
+    return render_template('client_regions.html')
+
+
+@app.route('/api/client-regions/stats')
+def client_regions_stats():
+    try:
+        total = ClientRegionProfile.query.count()
+        multi = ClientRegionProfile.query.filter_by(is_multi_region=True).count()
+        by_region = {}
+        for sid, label in SUBSIDIARY_LABELS.items():
+            by_region[label] = ClientRegionProfile.query.filter_by(primary_subsidiary_id=sid).count()
+        last = ClientRegionProfile.query.order_by(ClientRegionProfile.updated_at.desc()).first()
+        return jsonify({
+            'success': True,
+            'total_clients': total,
+            'multi_region_clients': multi,
+            'by_primary_region': by_region,
+            'last_rebuild_at': last.updated_at.isoformat() if last and last.updated_at else None,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/client-regions')
+def client_regions_list():
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        per_page = min(100, max(10, int(request.args.get('per_page', 50))))
+        q = (request.args.get('q') or '').strip()
+        multi_only = request.args.get('multi_only') == '1'
+        subsidiary_id = request.args.get('subsidiary_id', type=int)
+
+        query = ClientRegionProfile.query
+        if multi_only:
+            query = query.filter_by(is_multi_region=True)
+        if subsidiary_id:
+            query = query.filter_by(primary_subsidiary_id=subsidiary_id)
+        if q:
+            query = query.filter(ClientRegionProfile.client_id.ilike(f'%{q}%'))
+
+        total = query.count()
+        rows = query.order_by(
+            ClientRegionProfile.is_multi_region.desc(),
+            ClientRegionProfile.total_matches.desc(),
+            ClientRegionProfile.client_id,
+        ).offset((page - 1) * per_page).limit(per_page).all()
+
+        job_names = _job_name_map()
+        return jsonify({
+            'success': True,
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page if total else 0,
+            'items': [profile_to_api_dict(r, job_names) for r in rows],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/client-regions/lookup/<client_id>')
+def client_regions_lookup(client_id):
+    try:
+        profile = ClientRegionProfile.query.get(str(client_id))
+        if not profile:
+            return jsonify({'success': False, 'error': 'Client not found'}), 404
+        job_names = _job_name_map()
+        return jsonify({'success': True, 'profile': profile_to_api_dict(profile, job_names)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/client-regions/<client_id>/history')
+def client_regions_history(client_id):
+    try:
+        rows = ClientRegionHistory.query.filter_by(
+            client_id=str(client_id)
+        ).order_by(
+            ClientRegionHistory.job_id.desc(),
+            ClientRegionHistory.subsidiary_id,
+        ).all()
+        job_names = _job_name_map()
+        items = []
+        for h in rows:
+            match_types = json.loads(h.match_types_json or '{}')
+            items.append({
+                'job_id': h.job_id,
+                'job_name': job_names.get(h.job_id, f'Job {h.job_id}'),
+                'subsidiary_id': h.subsidiary_id,
+                'region': SUBSIDIARY_LABELS.get(h.subsidiary_id, '?'),
+                'match_count': h.match_count,
+                'billing_entity': h.billing_entity,
+                'match_types': match_types,
+                'total_stripe_amount': h.total_stripe_amount,
+            })
+        profile = ClientRegionProfile.query.get(str(client_id))
+        return jsonify({
+            'success': True,
+            'client_id': str(client_id),
+            'profile': profile_to_api_dict(profile, job_names) if profile else None,
+            'history': items,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/client-regions/rebuild', methods=['POST'])
+def client_regions_rebuild():
+    try:
+        result = rebuild_client_regions(db, MatchedTransaction, ClientRegionHistory, ClientRegionProfile)
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/receipts', methods=['GET', 'POST'])
 def receipts():
@@ -7146,12 +7283,24 @@ def download_split_journal(job_id, subsidiary_id, journal_type):
             if not salon_summit_df.empty:
                 journals[f'Salon_Summit_Installments_{builder.subsidiary_name}'] = salon_summit_df
         
-        # Find the requested journal
+        # Resolve journal by exact name (case-insensitive); avoid Refunds_EU matching Refunds_Cross_Subsidiary_EU
         journal_df = None
-        for journal_name, df in journals.items():
-            if journal_type.lower() in journal_name.lower():
-                journal_df = df
-                break
+        jt = (journal_type or '').strip()
+        jtl = jt.lower()
+        if jt in journals:
+            journal_df = journals[jt]
+        else:
+            for journal_name, df in journals.items():
+                if journal_name.lower() == jtl:
+                    journal_df = df
+                    break
+        if journal_df is None:
+            candidates = [(n, d) for n, d in journals.items() if jtl in n.lower()]
+            if len(candidates) == 1:
+                journal_df = candidates[0][1]
+            elif len(candidates) > 1:
+                candidates.sort(key=lambda x: len(x[0]))
+                journal_df = candidates[0][1]
         
         if journal_df is None or journal_df.empty:
             return jsonify({'error': f'Journal type "{journal_type}" not found or empty'}), 404
@@ -7159,9 +7308,14 @@ def download_split_journal(job_id, subsidiary_id, journal_type):
         # Export to CSV
         csv_file = builder.export_journal_to_csv(journal_df, journal_type)
         
+        csv_mimetype = (
+            'text/csv; charset=utf-8'
+            if subsidiary_id == 4
+            else 'text/csv'
+        )
         return send_file(
             csv_file,
-            mimetype='text/csv',
+            mimetype=csv_mimetype,
             as_attachment=True,
             download_name=f'{journal_type}_{builder.subsidiary_name}_Job{job_id}.csv'
         )

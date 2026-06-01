@@ -590,7 +590,7 @@ def create_models(db):
         id = Column(Integer, primary_key=True)
         dataset_id = Column(Integer, nullable=False)
         job_id = Column(Integer, nullable=False)
-        journal_type = Column(String(100), nullable=False)  # Main_EU, POA_EU, Cross_Subsidiary_EU, Refunds_EU, Main_AED, POA_AED, Cross_Subsidiary_AED, Refunds_AED
+        journal_type = Column(String(100), nullable=False)  # Main_EU, POA_EU, Cross_Subsidiary_EU, Refunds_EU, Refunds_Cross_Subsidiary_EU, Main_AED, ... Refunds_Cross_Subsidiary_AED
         client_id = Column(String(100))
         invoice_number = Column(String(200))
         amount = Column(Float, default=0)
@@ -803,6 +803,65 @@ def create_models(db):
         cr = Column(Numeric(15, 2), nullable=True)
         created_at = Column(DateTime, default=datetime.utcnow)
 
+    class ClientRegionHistory(db.Model):
+        """Per job/region match history for a client (from MatchedTransaction)."""
+        __tablename__ = 'client_region_history'
+
+        id = Column(Integer, primary_key=True)
+        client_id = Column(String(50), nullable=False, index=True)
+        subsidiary_id = Column(Integer, nullable=False)
+        job_id = Column(Integer, nullable=False)
+        match_count = Column(Integer, nullable=False, default=0)
+        billing_entity = Column(String(500), nullable=True)
+        match_types_json = Column(Text, nullable=True)
+        total_stripe_amount = Column(Float, nullable=True, default=0)
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+        __table_args__ = (
+            db.UniqueConstraint('client_id', 'subsidiary_id', 'job_id', name='uq_client_region_history'),
+        )
+
+        def to_dict(self):
+            return {
+                'client_id': self.client_id,
+                'subsidiary_id': self.subsidiary_id,
+                'job_id': self.job_id,
+                'match_count': self.match_count,
+                'billing_entity': self.billing_entity,
+                'match_types_json': self.match_types_json,
+                'total_stripe_amount': self.total_stripe_amount,
+                'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            }
+
+    class ClientRegionProfile(db.Model):
+        """Aggregated client → region lookup from matched Stripe reconciliations."""
+        __tablename__ = 'client_region_profiles'
+
+        client_id = Column(String(50), primary_key=True)
+        primary_subsidiary_id = Column(Integer, nullable=True)
+        is_multi_region = Column(Boolean, default=False)
+        regions_json = Column(Text, nullable=True)
+        region_counts_json = Column(Text, nullable=True)
+        last_subsidiary_id = Column(Integer, nullable=True)
+        last_job_id = Column(Integer, nullable=True)
+        last_billing_entity = Column(String(500), nullable=True)
+        total_matches = Column(Integer, nullable=False, default=0)
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+        def to_dict(self):
+            return {
+                'client_id': self.client_id,
+                'primary_subsidiary_id': self.primary_subsidiary_id,
+                'is_multi_region': self.is_multi_region,
+                'regions_json': self.regions_json,
+                'region_counts_json': self.region_counts_json,
+                'last_subsidiary_id': self.last_subsidiary_id,
+                'last_job_id': self.last_job_id,
+                'last_billing_entity': self.last_billing_entity,
+                'total_matches': self.total_matches,
+                'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            }
+
     return (Receipt, ProcessingJob, Subsidiary, StripeTransaction, CashbookTransaction,
             LookerCashbookTransaction, MatchedTransaction, ReconciliationResults, JournalTransaction,
             FPDataset, FPJournalRow, FPWorkingRow, FPSummitInstallment, FPProcessedJournal, FPMatchResult,
@@ -811,4 +870,5 @@ def create_models(db):
             ManualPaymentOriginalCashbook, ManualPaymentOriginalBank,
             ManualPaymentProcessedCashbook, ManualPaymentProcessedBank, ManualPaymentState,
             BacsReviewOriginal, BacsReviewProcessed, BacsReviewState,
-            PartnerTransfer, PartnerTransferIn, PartnerTransferOut)
+            PartnerTransfer, PartnerTransferIn, PartnerTransferOut,
+            ClientRegionHistory, ClientRegionProfile)
