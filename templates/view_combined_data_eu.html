@@ -23,7 +23,10 @@
 </head>
 <body>
     <div class="container">
-        <a href="/journals-eu/?job_id={{ job_id }}" class="back-link">← Back to EU Journals Processing</a>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;">
+            <a href="/journals-eu/?job_id={{ job_id }}" class="back-link" style="margin-bottom:0">← Back to EU Journals Processing</a>
+            <a href="/reconciliation/{{ job_id }}" class="back-link" style="margin-bottom:0">Select Subsidiary</a>
+        </div>
         
         <h1>📊 EU Combined Journals Data Viewer</h1>
         

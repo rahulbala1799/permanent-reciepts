@@ -9,7 +9,8 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
-{% set nav_active = 'receipts' %}
+{% set nav_active = 'rec_hub' %}
+{% set nav_master_cashbook_job_id = job_id %}
 {% set nav_extra_links = [] %}
 {% include 'partials/navbar.html' %}
 
@@ -235,6 +236,8 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/workbook_actions.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/region_nav.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const jobId = {{ job_id }};
@@ -271,6 +274,11 @@
         }
 
         function loadSubsidiaries() {
+            fetch(`/api/master-cashbook/${jobId}/workbook/summary`)
+                .then(r => r.json())
+                .then(wb => { window._wbSummary = wb.success ? wb : null; })
+                .catch(() => { window._wbSummary = null; })
+                .finally(() => {
             fetch('/api/subsidiaries')
                 .then(response => response.json())
                 .then(subsidiaries => {
@@ -285,24 +293,39 @@
                         return;
                     }
                     
-                    container.innerHTML = subsidiaries.map(subsidiary => `
+                    container.innerHTML = subsidiaries.map(subsidiary => {
+                        const wbLabel = {1:'AU',2:'CA',3:'US',4:'EU',5:'UK'}[subsidiary.id] || 'Region';
+                        const wbCount = (window._wbSummary && window._wbSummary.by_region && window._wbSummary.by_region[wbLabel])
+                            ? window._wbSummary.by_region[wbLabel].count : null;
+                        const wbBadge = wbCount != null ? `<span class="badge bg-info ms-1">${wbCount} in workbook</span>` : '';
+                        return `
                         <div class="col-md-6 col-lg-4 mb-3">
-                            <div class="card h-100 subsidiary-card" onclick="navigateToSubsidiary(${subsidiary.id})">
+                            <div class="card h-100 subsidiary-card" data-subsidiary-id="${subsidiary.id}" onclick="navigateToSubsidiary(${subsidiary.id})">
                                 <div class="card-body text-center">
                                     <div class="mb-3">
                                         <i class="fas fa-building fa-3x text-primary"></i>
                                     </div>
-                                    <h5 class="card-title">${subsidiary.name}</h5>
+                                    <h5 class="card-title">${subsidiary.name} ${wbBadge}</h5>
                                     <p class="card-text text-muted">${subsidiary.region || 'Global'}</p>
-                                    <div class="mt-auto">
-                                        <button class="btn btn-outline-primary" onclick="startRecProcess(${subsidiary.id})">
+                                    <div class="mt-auto d-flex flex-column gap-2" onclick="event.stopPropagation()">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="startRecProcess(${subsidiary.id})">
                                             <i class="fas fa-play"></i> Start Rec Process
                                         </button>
+                                        <a class="btn btn-info btn-sm journal-prep-btn" style="display:none"
+                                           href="/journal-preparation/${jobId}/${subsidiary.id}">
+                                            <i class="fas fa-file-invoice"></i> Journal Preparation
+                                        </a>
+                                        <div class="btn-group btn-group-sm">
+                                            <button type="button" class="btn btn-info" onclick="workbookUpdate(${jobId}, ${subsidiary.id}, this)" title="Update Cashbook"><i class="fas fa-book"></i></button>
+                                            <button type="button" class="btn btn-outline-warning" onclick="workbookClear(${jobId}, ${subsidiary.id}, '${wbLabel}', this)" title="Clear tab"><i class="fas fa-eraser"></i></button>
+                                            <button type="button" class="btn btn-outline-danger" onclick="workbookRerun(${jobId}, ${subsidiary.id}, '${wbLabel}', this)" title="Rerun"><i class="fas fa-redo"></i></button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    `).join('');
+                        </div>`;
+                    }).join('');
+                    refreshSubsidiaryJournalPrepButtons(subsidiaries);
                 })
                 .catch(error => {
                     console.error('Error loading subsidiaries:', error);
@@ -313,11 +336,25 @@
                         </div>
                     `;
                 });
+                });
         }
 
         function navigateToSubsidiary(subsidiaryId) {
             // Navigate to the subsidiary-specific reconciliation page
             window.location.href = `/reconciliation/${jobId}/${subsidiaryId}`;
+        }
+
+        function refreshSubsidiaryJournalPrepButtons(subsidiaries) {
+            subsidiaries.forEach(s => {
+                RegionNav.fetchReady(jobId, s.id)
+                    .then(data => {
+                        if (!data.ready) return;
+                        const card = document.querySelector(`.subsidiary-card[data-subsidiary-id="${s.id}"]`);
+                        const btn = card && card.querySelector('.journal-prep-btn');
+                        if (btn) btn.style.display = '';
+                    })
+                    .catch(err => console.warn('Journal prep button:', err));
+            });
         }
 
         function showUploadModal() {

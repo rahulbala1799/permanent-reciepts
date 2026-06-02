@@ -11,8 +11,107 @@ HARD RULE: This class is COMPLETELY READ-ONLY
 
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import io
+
+
+def _clean_hash(val) -> str:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ''
+    s = str(val).strip()
+    if s.lower() in ('', 'nan', 'none'):
+        return ''
+    return s
+
+
+def _format_reasoncode(val) -> str:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ''
+    try:
+        f = float(val)
+        if f == int(f):
+            return str(int(f))
+    except (TypeError, ValueError):
+        pass
+    s = str(val).strip()
+    return s if s.lower() not in ('', 'nan', 'none') else ''
+
+
+def _row_value(row: Union[dict, pd.Series], key: str, alt_key: str = None):
+    if isinstance(row, dict):
+        if key in row and row.get(key) is not None:
+            return row.get(key)
+        if alt_key:
+            return row.get(alt_key)
+        return None
+    if hasattr(row, 'index'):
+        if key in row.index:
+            return row[key]
+        if alt_key and alt_key in row.index:
+            return row[alt_key]
+    val = getattr(row, key, None)
+    if val is not None:
+        return val
+    if alt_key:
+        return getattr(row, alt_key, None)
+    return None
+
+
+def resolve_invoice_number(row: Union[dict, pd.Series]) -> str:
+    """Prefer cashbook/master invoice #; fall back to CPMT formula."""
+    invoice_hash = _clean_hash(_row_value(row, 'invoice_hash', 'cb_invoice_hash'))
+    if invoice_hash:
+        return invoice_hash
+
+    client_id = _row_value(row, 'client_id', 'cb_client_id')
+    invoice_number = _row_value(row, 'invoice_number', 'cb_invoice_number')
+    if client_id is not None and invoice_number is not None:
+        cid = str(client_id).strip()
+        inv = str(invoice_number).strip()
+        if cid and inv and cid.lower() != 'nan' and inv.lower() != 'nan':
+            return f'CPMT: {cid}-{inv}'
+
+    if invoice_number is not None:
+        inv = str(invoice_number).strip()
+        if inv and inv.lower() != 'nan':
+            return f'CPMT: {inv}'
+    return ''
+
+
+def resolve_payment_number(row: Union[dict, pd.Series]) -> str:
+    """Prefer master/cashbook payment #; append reasoncode when not already included."""
+    payment_hash = _clean_hash(_row_value(row, 'payment_hash', 'cb_payment_hash'))
+    reasoncode = _format_reasoncode(_row_value(row, 'reasoncode', 'cb_reasoncode'))
+
+    if payment_hash:
+        if reasoncode and reasoncode not in payment_hash:
+            return f'{payment_hash}-{reasoncode}'
+        return payment_hash
+
+    invoice_number = _row_value(row, 'invoice_number', 'cb_invoice_number')
+    payment_date = _row_value(row, 'payment_date', 'cb_payment_date')
+    client_id = _row_value(row, 'client_id', 'cb_client_id')
+
+    if client_id is not None and invoice_number is not None and payment_date is not None:
+        cid = str(client_id).strip()
+        inv = str(invoice_number).strip()
+        pdate = str(payment_date).strip()
+        if cid and inv and pdate and 'nan' not in (cid.lower(), inv.lower(), pdate.lower()):
+            base = f'CPMT: {cid}-{inv}-{pdate}'
+            if reasoncode:
+                return f'{base}-{reasoncode}'
+            return base
+
+    if invoice_number is not None and payment_date is not None:
+        inv = str(invoice_number).strip()
+        pdate = str(payment_date).strip()
+        if inv and pdate and inv.lower() != 'nan' and pdate.lower() != 'nan':
+            base = f'CPMT: {inv}-{pdate}'
+            if reasoncode:
+                return f'{base}-{reasoncode}'
+            return base
+
+    return ''
 
 
 def _cashbook_location_for_region(row: pd.Series) -> str:
@@ -332,15 +431,10 @@ class JournalBuilder:
         if bank_account:
             df['account'] = bank_account
         
-        # Add the required formulas for invoice # and payment #
+        # Use cashbook/master invoice # and payment # (with reasoncode suffix when needed)
         journal_df = df.copy()
-        
-        # Invoice # formula: CPMT: {invoice_number}
-        journal_df['invoice #'] = 'CPMT: ' + journal_df['invoice_number'].astype(str)
-        
-        # Payment # formula: CPMT: {invoice_number}-{date}
-        # Convert date to string format (dd/mm/yyyy)
-        journal_df['payment #'] = 'CPMT: ' + journal_df['invoice_number'].astype(str) + '-' + journal_df['payment_date'].astype(str)
+        journal_df['invoice #'] = journal_df.apply(resolve_invoice_number, axis=1)
+        journal_df['payment #'] = journal_df.apply(resolve_payment_number, axis=1)
         
         # Rename other columns to match cashbook upload format
         journal_df = journal_df.rename(columns={

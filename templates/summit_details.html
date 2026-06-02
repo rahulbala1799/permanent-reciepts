@@ -51,6 +51,11 @@
             top: 1rem;
             left: 1rem;
         }
+        .hub-button {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -63,11 +68,14 @@
 
     <div id="content" style="display: none;">
         <div class="header-gradient">
-            <div class="container">
+            <div class="container position-relative">
                 <div class="row">
                     <div class="col-12">
                         <a href="javascript:history.back()" class="btn btn-light back-button">
                             <i class="fas fa-arrow-left"></i> Back
+                        </a>
+                        <a href="/reconciliation/{{ job_id }}" class="btn btn-light hub-button">
+                            <i class="fas fa-building"></i> Select Subsidiary
                         </a>
                         <h1 class="text-center mb-0">
                             <i class="fas fa-search"></i> Salon Summit Matching Details

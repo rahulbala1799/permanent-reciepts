@@ -178,7 +178,9 @@ def create_models(db):
         invoice_hash = Column(String(255), nullable=True)  # invoice # column
         payment_hash = Column(String(255), nullable=True)  # payment # column
         memo = Column(Float, nullable=True)  # Memo column
-        
+
+        master_cashbook_id = Column(Integer, nullable=True, index=True)
+
         # Metadata
         uploaded_at = Column(DateTime, default=datetime.utcnow)
         filename = Column(String(255), nullable=True)
@@ -189,6 +191,7 @@ def create_models(db):
                 'id': self.id,
                 'subsidiary_id': self.subsidiary_id,
                 'job_id': self.job_id,
+                'master_cashbook_id': self.master_cashbook_id,
                 'payment_date': self.payment_date,  # Already a string in dd/mm/yyyy format
                 'client_id': self.client_id,
                 'invoice_number': self.invoice_number,
@@ -209,6 +212,85 @@ def create_models(db):
                 'memo': self.memo,
                 'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
                 'filename': self.filename
+            }
+
+    class MasterCashbookTransaction(db.Model):
+        """Full monthly processed cashbook before regional split (job-scoped)."""
+        __tablename__ = 'master_cashbook_transactions'
+
+        id = Column(Integer, primary_key=True)
+        job_id = Column(Integer, nullable=False, index=True)
+
+        payment_date = Column(String(20), nullable=True)
+        client_id = Column(Integer, nullable=True)
+        invoice_number = Column(String(255), nullable=True)
+        billing_entity = Column(String(500), nullable=True)
+        ar_account = Column(String(500), nullable=True)
+        currency = Column(String(10), nullable=True)
+        exchange_rate = Column(Float, nullable=True)
+        amount = Column(Float, nullable=True)
+        account = Column(String(500), nullable=True)
+        location = Column(String(100), nullable=True)
+        transtype = Column(String(100), nullable=True)
+        comment = Column(Text, nullable=True)
+        card_reference = Column(Float, nullable=True)
+        reasoncode = Column(Float, nullable=True)
+        sepaprovider = Column(String(255), nullable=True)
+        invoice_hash = Column(String(255), nullable=True)
+        payment_hash = Column(String(255), nullable=True)
+        memo = Column(Float, nullable=True)
+
+        assigned_subsidiary_id = Column(Integer, nullable=True)
+        assignment_source = Column(String(50), nullable=True)
+        assignment_detail = Column(String(500), nullable=True)
+        original_account = Column(String(500), nullable=True)
+        original_billing_entity = Column(String(500), nullable=True)
+        fields_corrected = Column(Boolean, default=False)
+
+        workbook_region_id = Column(Integer, nullable=True, index=True)
+        workbook_updated_at = Column(DateTime, nullable=True)
+        workbook_uk_bacs = Column(Boolean, default=False, index=True)
+        workbook_partner_transfer = Column(Boolean, default=False, index=True)
+        workbook_sepa_netting = Column(Boolean, default=False, index=True)
+
+        uploaded_at = Column(DateTime, default=datetime.utcnow)
+        filename = Column(String(255), nullable=True)
+
+        def to_dict(self):
+            return {
+                'id': self.id,
+                'job_id': self.job_id,
+                'payment_date': self.payment_date,
+                'client_id': self.client_id,
+                'invoice_number': self.invoice_number,
+                'billing_entity': self.billing_entity,
+                'ar_account': self.ar_account,
+                'currency': self.currency,
+                'exchange_rate': self.exchange_rate,
+                'amount': self.amount,
+                'account': self.account,
+                'location': self.location,
+                'transtype': self.transtype,
+                'comment': self.comment,
+                'card_reference': self.card_reference,
+                'reasoncode': self.reasoncode,
+                'sepaprovider': self.sepaprovider,
+                'invoice_hash': self.invoice_hash,
+                'payment_hash': self.payment_hash,
+                'memo': self.memo,
+                'assigned_subsidiary_id': self.assigned_subsidiary_id,
+                'assignment_source': self.assignment_source,
+                'assignment_detail': self.assignment_detail,
+                'original_account': self.original_account,
+                'original_billing_entity': self.original_billing_entity,
+                'fields_corrected': self.fields_corrected,
+                'workbook_region_id': self.workbook_region_id,
+                'workbook_updated_at': self.workbook_updated_at.isoformat() if self.workbook_updated_at else None,
+                'workbook_uk_bacs': bool(self.workbook_uk_bacs),
+                'workbook_partner_transfer': bool(self.workbook_partner_transfer),
+                'workbook_sepa_netting': bool(self.workbook_sepa_netting),
+                'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+                'filename': self.filename,
             }
     
     class LookerCashbookTransaction(db.Model):
@@ -871,4 +953,5 @@ def create_models(db):
             ManualPaymentProcessedCashbook, ManualPaymentProcessedBank, ManualPaymentState,
             BacsReviewOriginal, BacsReviewProcessed, BacsReviewState,
             PartnerTransfer, PartnerTransferIn, PartnerTransferOut,
-            ClientRegionHistory, ClientRegionProfile)
+            ClientRegionHistory, ClientRegionProfile,
+            MasterCashbookTransaction)

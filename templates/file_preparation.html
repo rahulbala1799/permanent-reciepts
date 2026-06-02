@@ -10,6 +10,7 @@
 </head>
 <body>
 {% set nav_active = 'receipts' %}
+{% set nav_master_cashbook_job_id = job_id %}
 {% set nav_extra_links = [] %}
 {% include 'partials/navbar.html' %}
 
@@ -112,6 +113,20 @@
                                         <div class="mt-auto">
                                             <button class="btn btn-outline-secondary">
                                                 <i class="fas fa-tools"></i> Open Workspace
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card h-100 preparation-process" onclick="openMasterCashbook()">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-book fa-3x text-danger mb-3"></i>
+                                        <h5 class="card-title">Master Cashbook Split</h5>
+                                        <p class="card-text">Upload full monthly cashbook and split by Stripe region</p>
+                                        <div class="mt-auto">
+                                            <button class="btn btn-outline-danger">
+                                                <i class="fas fa-globe"></i> Open
                                             </button>
                                         </div>
                                     </div>
@@ -675,6 +690,10 @@
         function openManualPaymentAutomation() {
             // Navigate to Manual Payment Automation page
             window.location.href = `/manual-payment-automation/${jobId}`;
+        }
+
+        function openMasterCashbook() {
+            window.location.href = `/prepare/master-cashbook/${jobId}`;
         }
 
         function openCustomMapping() {

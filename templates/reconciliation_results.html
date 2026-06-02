@@ -10,6 +10,8 @@
 </head>
 <body>
 {% set nav_active = 'receipts' %}
+{% set nav_master_cashbook_job_id = job_id %}
+{% set nav_subsidiary_id = subsidiary_id %}
 {% set nav_extra_links = [] %}
 {% include 'partials/navbar.html' %}
 
@@ -31,6 +33,15 @@
                 <!-- Summary Cards -->
                 <div class="row mb-4" id="summary-cards">
                     <!-- Will be populated by JavaScript -->
+                </div>
+
+                {% set _wb_labels = {1:'AU',2:'CA',3:'US',4:'EU',5:'UK'} %}
+                <div class="card mb-3">
+                    <div class="card-body py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span class="text-muted small"><i class="fas fa-book"></i> Master Cashbook workbook</span>
+                        {% set wb_job_id = job_id %}{% set wb_subsidiary_id = subsidiary_id %}{% set wb_region_label = _wb_labels.get(subsidiary_id, 'Region') %}{% set wb_layout = 'inline' %}
+                        {% include 'partials/workbook_actions.html' %}
+                    </div>
                 </div>
 
                 <!-- Tabs for different result types -->
@@ -207,6 +218,7 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/workbook_actions.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Get job and subsidiary IDs from URL

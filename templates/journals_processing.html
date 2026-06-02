@@ -239,6 +239,8 @@
         <a href="/">Dashboard</a>
         <a href="/receipts">Reconciliation Jobs</a>
         <a href="/client-regions">Client Regions</a>
+        {% include 'partials/rec_subsidiary_hub_link.html' %}
+        <a href="/prepare/master-cashbook/{{ job_id }}">Master Cashbook</a>
     </nav>
     <div class="container">
         <a href="/journal-preparation" class="back-link">← Back to Journal Preparation</a>

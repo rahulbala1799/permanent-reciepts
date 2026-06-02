@@ -1,0 +1,8 @@
+{% if job_id is defined and job_id %}
+<nav style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;font-weight:600;margin-bottom:14px;padding:8px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
+    <a href="/" style="color:#374151;text-decoration:none;">Dashboard</a>
+    <a href="/receipts" style="color:#374151;text-decoration:none;">Reconciliation Jobs</a>
+    <a href="/reconciliation/{{ job_id }}" style="color:#2563eb;text-decoration:none;">Select Subsidiary</a>
+    <a href="/prepare/master-cashbook/{{ job_id }}" style="color:#374151;text-decoration:none;">Master Cashbook</a>
+</nav>
+{% endif %}

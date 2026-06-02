@@ -1,0 +1,2239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Master Cashbook — Receipts Automation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #2563eb;
+            --accent-light: #eff6ff;
+            --accent-dark: #1d4ed8;
+            --success: #059669;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --surface: #f9fafb;
+            --radius: 10px;
+        }
+
+        body { background: #f3f4f6; color: #111827; }
+
+        /* ── Full-width layout ── */
+        .mc-container { width: 100%; max-width: 100%; padding: 0 28px; }
+        @media (max-width: 768px) { .mc-container { padding: 0 12px; } }
+
+        /* ── Page header ── */
+        .page-header {
+            background: #1e293b;
+            color: #fff;
+            padding: 20px 0 0;
+            margin-bottom: 24px;
+        }
+        .page-header h1 { font-size: 1.35rem; font-weight: 700; margin: 0; }
+        .page-header .sub { font-size: 0.82rem; color: #94a3b8; margin-top: 3px; }
+        .page-header .nav-strip {
+            display: flex;
+            gap: 4px;
+            margin-top: 16px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding-top: 0;
+        }
+        .page-header .nav-strip a {
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #94a3b8;
+            text-decoration: none;
+            border-radius: 6px 6px 0 0;
+            transition: all .15s;
+        }
+        .page-header .nav-strip a:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+        /* ── Cards ── */
+        .mc-card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 1px 3px rgba(0,0,0,.06);
+            margin-bottom: 20px;
+        }
+        .mc-card-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .mc-card-header h2 {
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: #374151;
+            margin: 0;
+        }
+        .mc-card-body { padding: 20px; }
+
+        /* ── Overview stat tiles ── */
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+        .stat-tile {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .stat-tile .st-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+        .stat-tile .st-value { font-size: 1.55rem; font-weight: 800; line-height: 1.1; color: #111827; }
+        .stat-tile .st-sub { font-size: 0.75rem; color: var(--muted); }
+        .stat-tile.accent  { border-left: 4px solid var(--accent); }
+        .stat-tile.success { border-left: 4px solid var(--success); }
+        .stat-tile.warning { border-left: 4px solid var(--warning); }
+        .stat-tile.danger  { border-left: 4px solid var(--danger); }
+        .stat-tile.info    { border-left: 4px solid #0891b2; }
+
+        /* ── Region cards ── */
+        .region-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+        .region-card {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+        }
+        .region-card .rc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .region-card .rc-flag {
+            font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+            background: var(--accent-light); color: var(--accent);
+            padding: 3px 10px; border-radius: 99px;
+        }
+        .region-card .rc-label { font-size: 1rem; font-weight: 700; }
+        .region-card .rc-amount { font-size: 1.15rem; font-weight: 800; color: var(--success); margin-bottom: 6px; }
+        .region-card .rc-meta { font-size: 0.75rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+        .region-card .rc-meta span { display: flex; align-items: center; gap: 5px; }
+        .rc-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+        /* ── Workbook tabs ── */
+        .wb-tabs-wrapper {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 1px 3px rgba(0,0,0,.06);
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .wb-tab-bar {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            padding: 0 16px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .wb-tab-bar::-webkit-scrollbar { display: none; }
+        .wb-tab-btn {
+            flex-shrink: 0;
+            padding: 10px 16px 9px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--muted);
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            transition: all .15s;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+        .wb-tab-btn:hover { color: var(--accent); }
+        .wb-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .wb-tab-btn .tb-count {
+            background: #e5e7eb; color: #374151;
+            font-size: 0.68rem; font-weight: 700;
+            padding: 1px 7px; border-radius: 99px;
+        }
+        .wb-tab-btn.active .tb-count { background: var(--accent-light); color: var(--accent); }
+        .wb-tab-btn .tb-unusual {
+            background: #fef2f2; color: var(--danger);
+            font-size: 0.68rem; font-weight: 700;
+            padding: 1px 7px; border-radius: 99px;
+        }
+        .wb-tab-btn .tb-bacs {
+            background: #eff6ff; color: #1d4ed8;
+            font-size: 0.68rem; font-weight: 700;
+            padding: 1px 7px; border-radius: 99px;
+        }
+
+        .wb-pane { display: none; padding: 20px; }
+        .wb-pane.active { display: block; }
+
+        /* ── Tab dashboard ── */
+        .tab-dash {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 18px;
+            align-items: start;
+        }
+        @media (max-width: 768px) { .tab-dash { grid-template-columns: 1fr 1fr; } }
+        .td-main {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px 18px;
+        }
+        .td-main .tdm-val { font-size: 1.8rem; font-weight: 900; color: #111827; line-height: 1; }
+        .td-main .tdm-label { font-size: 0.7rem; text-transform: uppercase; font-weight: 600; letter-spacing:.05em; color:var(--muted); margin-top: 4px; }
+        .td-main .tdm-amount { font-size: 1rem; font-weight: 700; color: var(--success); margin-top: 6px; }
+
+        .td-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .td-panel-title { font-size: 0.68rem; text-transform: uppercase; font-weight: 700; letter-spacing:.05em; color:var(--muted); margin-bottom: 8px; }
+        .tt-bar { display: flex; flex-direction: column; gap: 5px; }
+        .tt-row { display: flex; align-items: center; gap: 8px; font-size: 0.76rem; }
+        .tt-row .tt-name { width: 100px; color: #374151; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+        .tt-row .tt-track { flex: 1; background: #e5e7eb; border-radius: 99px; height: 6px; overflow: hidden; }
+        .tt-row .tt-fill { height: 100%; background: var(--accent); border-radius: 99px; }
+        .tt-row .tt-num { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; min-width: 32px; text-align: right; }
+        .cur-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+        .cur-chip { font-size: 0.72rem; font-weight: 700; background: var(--accent-light); color: var(--accent); padding: 3px 9px; border-radius: 99px; }
+
+        /* ── Action bars ── */
+        .wb-action-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 14px;
+        }
+        .wb-action-bar.bacs { background: #eff6ff; border-color: #bfdbfe; }
+        .wb-action-bar.partner { background: #f5f3ff; border-color: #ddd6fe; }
+        .wb-action-bar.region { background: #f0fdf4; border-color: #bbf7d0; }
+
+        /* ── Stripe journals panel (region tabs) ── */
+        .wb-journals-panel {
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 14px;
+            overflow: hidden;
+        }
+        .wb-journals-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 14px;
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #374151;
+        }
+        .wb-journals-header .memo-line {
+            font-weight: 500;
+            font-size: 0.76rem;
+            color: var(--muted);
+        }
+        .wb-journals-body { padding: 10px 14px 12px; }
+        .wb-journals-table {
+            width: 100%;
+            font-size: 0.78rem;
+            border-collapse: collapse;
+        }
+        .wb-journals-table th {
+            text-align: left;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
+            padding: 4px 8px 6px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .wb-journals-table td {
+            padding: 7px 8px 7px 0;
+            border-bottom: 1px solid #f3f4f6;
+            vertical-align: middle;
+        }
+        .wb-journals-table tr:last-child td { border-bottom: none; }
+        .wb-journals-badge {
+            display: inline-block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 99px;
+        }
+        .wb-journals-badge.main { background: #dcfce7; color: #166534; }
+        .wb-journals-badge.refunds { background: #fee2e2; color: #991b1b; }
+        .wb-journals-badge.poa { background: #e0f2fe; color: #0369a1; }
+        .wb-journals-badge.cross { background: #fef3c7; color: #92400e; }
+        .wb-journals-badge.curr { background: #f3f4f6; color: #4b5563; margin-left: 4px; }
+        .wb-journals-info {
+            font-size: 0.78rem;
+            color: #374151;
+            padding: 8px 12px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 6px;
+        }
+        .wb-journals-info a { font-weight: 600; }
+
+        /* ── Filter bar ── */
+        .wb-filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .wb-filter-bar label { font-size: 0.8rem; font-weight: 600; color: #92400e; }
+
+        /* ── Table ── */
+        .wb-table-wrap {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: auto;
+            /* ~45 rows × 29px per row + 36px header */
+            max-height: calc(45 * 29px + 36px);
+        }
+        .wb-table {
+            font-size: 0.77rem;
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .wb-table thead tr.sort-row th {
+            position: sticky;
+            top: 0;
+            background: #f1f5f9;
+            font-size: 0.69rem;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            font-weight: 700;
+            color: #475569;
+            padding: 0;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            z-index: 2;
+        }
+        .th-inner {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 4px; padding: 8px 10px; cursor: pointer; user-select: none;
+            transition: background .1s;
+        }
+        .th-inner:hover { background: #e2e8f0; }
+        .th-inner.filter-active { background: var(--accent-light); }
+        .th-inner .th-label { flex: 1; cursor: pointer; }
+        .th-inner .th-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .th-inner .filter-icon { font-size: 0.58rem; color: var(--accent); }
+        .th-inner .filter-icon.inactive { opacity: 0; }
+        .th-inner:hover .filter-icon.inactive { opacity: 0.35; }
+        .th-inner .sort-icon { font-size: 0.6rem; opacity: .4; flex-shrink: 0; cursor: pointer; padding: 2px; }
+        .th-inner .sort-icon:hover { opacity: 1; color: var(--accent); }
+        .th-inner.sorted-asc  .sort-icon,
+        .th-inner.sorted-desc .sort-icon { opacity: 1; color: var(--accent); }
+
+        /* Column filter dropdown (multi-select checkboxes) */
+        .col-filter-menu {
+            position: fixed;
+            z-index: 3000;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, .14);
+            min-width: 220px;
+            max-width: 300px;
+            max-height: 360px;
+            display: none;
+            flex-direction: column;
+        }
+        .col-filter-menu.open { display: flex; }
+        .cfm-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 12px; border-bottom: 1px solid var(--border);
+            font-size: 0.78rem; font-weight: 700; color: #1e293b;
+        }
+        .cfm-header button {
+            border: none; background: none; color: #64748b; cursor: pointer;
+            font-size: 1rem; line-height: 1; padding: 0 2px;
+        }
+        .cfm-header button:hover { color: #dc2626; }
+        .cfm-actions {
+            display: flex; gap: 6px; padding: 6px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .cfm-actions button {
+            font-size: 0.7rem; font-weight: 600; padding: 3px 10px;
+            border: 1px solid #d1d5db; border-radius: 5px;
+            background: #fff; color: #374151; cursor: pointer;
+        }
+        .cfm-actions button:hover { background: #f1f5f9; border-color: var(--accent); color: var(--accent); }
+        .cfm-search { padding: 6px 12px; border-bottom: 1px solid #f1f5f9; }
+        .cfm-search input {
+            width: 100%; font-size: 0.75rem; padding: 5px 8px;
+            border: 1px solid #d1d5db; border-radius: 5px; outline: none;
+        }
+        .cfm-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+        .cfm-options { overflow-y: auto; flex: 1; padding: 4px 0; max-height: 240px; }
+        .cfm-option {
+            display: flex; align-items: center; gap: 8px;
+            padding: 5px 12px; font-size: 0.75rem; cursor: pointer; color: #1f2937;
+        }
+        .cfm-option:hover { background: #f8fafc; }
+        .cfm-option input[type=checkbox] { cursor: pointer; flex-shrink: 0; accent-color: var(--accent); }
+        .cfm-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cfm-empty { padding: 12px; font-size: 0.75rem; color: var(--muted); text-align: center; }
+        .cfm-footer {
+            padding: 6px 12px; border-top: 1px solid var(--border);
+            font-size: 0.68rem; color: var(--muted); text-align: center;
+        }
+        .wb-active-filters {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+            margin-bottom: 10px;
+        }
+        .wb-active-filters:empty { display: none; }
+        .active-filter-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.72rem; font-weight: 600;
+            background: var(--accent-light); color: var(--accent);
+            border: 1px solid #bfdbfe; border-radius: 99px;
+            padding: 3px 8px 3px 10px;
+        }
+        .active-filter-chip button {
+            border: none; background: none; color: inherit; padding: 0;
+            line-height: 1; cursor: pointer; opacity: .7;
+        }
+        .active-filter-chip button:hover { opacity: 1; }
+        .wb-table tbody tr { border-bottom: 1px solid #f1f5f9; }
+        .wb-table tbody tr:last-child { border-bottom: none; }
+        .wb-table tbody tr:hover td { background: #f8fafc !important; }
+        .wb-table td { padding: 7px 10px; white-space: nowrap; color: #1f2937; }
+        .wb-table td.amount-cell { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+        .wb-table td.date-cell { color: var(--muted); font-size: 0.72rem; }
+
+        /* Global search box */
+        .wb-search-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; background: #f8fafc;
+            border: 1px solid var(--border); border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .wb-search-bar input {
+            flex: 1; border: 1px solid #d1d5db; border-radius: 6px;
+            padding: 5px 10px; font-size: 0.82rem; outline: none;
+        }
+        .wb-search-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+        .wb-search-bar .clear-btn {
+            font-size: 0.75rem; font-weight: 600; padding: 4px 10px;
+            border: 1px solid var(--border); border-radius: 6px;
+            background: #fff; color: #374151; cursor: pointer;
+        }
+        .wb-search-bar .clear-btn:hover { background: #fee2e2; border-color: #fca5a5; color: var(--danger); }
+        .filter-active-badge {
+            font-size: 0.7rem; font-weight: 700;
+            background: var(--accent-light); color: var(--accent);
+            padding: 2px 8px; border-radius: 99px;
+        }
+
+        /* ── Row highlights ── */
+        .row-unusual td { background: #fff7ed !important; }
+        .row-unusual-matched td { background: #fff1f2 !important; }
+        .row-uk-bacs td { background: #eff6ff !important; }
+        .row-partner-transfer td { background: #f3e8ff !important; }
+        .row-sepa-netting td { background: #ecfdf5 !important; }
+        .row-unusual-matched { box-shadow: inset 3px 0 0 var(--danger); }
+        .row-uk-bacs { box-shadow: inset 3px 0 0 var(--accent); }
+        .row-partner-transfer { box-shadow: inset 3px 0 0 #7c3aed; }
+        .row-sepa-netting { box-shadow: inset 3px 0 0 #059669; }
+
+        /* ── Flags ── */
+        .flag {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 0.65rem; font-weight: 800;
+            padding: 2px 8px; border-radius: 4px;
+            letter-spacing: .03em; text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .flag.unusual-match { background: var(--danger); color: #fff; animation: fpulse 2s ease-in-out infinite; }
+        .flag.unusual-type  { background: #ea580c; color: #fff; }
+        .flag.uk-bacs       { background: var(--accent); color: #fff; }
+        .flag.partner-transfer { background: #7c3aed; color: #fff; }
+        .flag.sepa-netting    { background: #059669; color: #fff; }
+        @keyframes fpulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,.4); }
+            50%      { box-shadow: 0 0 0 5px rgba(220,38,38,0); }
+        }
+
+        /* ── Banners ── */
+        .wb-banner {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px; border-radius: 8px;
+            font-size: 0.82rem; font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .wb-banner.unusual { background: #fff7ed; border: 1px solid #fdba74; color: #92400e; }
+        .wb-banner.filter  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+
+        /* ── Pager ── */
+        .wb-pager { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; flex-wrap: wrap; gap: 8px; }
+        .wb-pager .pg-info { font-size: 0.77rem; color: var(--muted); }
+        .pg-btns { display: flex; gap: 4px; }
+        .pg-btn {
+            padding: 5px 14px; font-size: 0.78rem; font-weight: 600;
+            border: 1px solid var(--border); border-radius: 6px;
+            background: #fff; color: #374151; cursor: pointer;
+        }
+        .pg-btn:hover:not(:disabled) { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .pg-btn:disabled { opacity: .4; cursor: default; }
+
+        /* ── Legend ── */
+        .wb-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.77rem; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+        .legend-item { display: flex; align-items: center; gap: 6px; color: #374151; }
+        .legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+
+        /* ── Fullscreen workbook ── */
+        .wb-fullscreen-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1050;
+            background: #f3f4f6;
+            flex-direction: column;
+        }
+        .wb-fullscreen-overlay.open { display: flex; }
+        .wb-fs-header {
+            background: #1e293b;
+            color: #fff;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .wb-fs-header h2 { font-size: 0.95rem; font-weight: 700; margin: 0; color: #e2e8f0; }
+        .wb-fs-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+        }
+        /* When fullscreen is open, table fills remaining height */
+        .wb-fullscreen-overlay .wb-tab-bar { border-radius: 0; flex-shrink: 0; }
+        .wb-fullscreen-overlay .wb-pane { flex: 1; overflow: auto; display: none; flex-direction: column; }
+        .wb-fullscreen-overlay .wb-pane.active { display: flex; }
+        .wb-fullscreen-overlay .wb-table-wrap {
+            flex: 1;
+            max-height: none;
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+            border-bottom: none;
+        }
+        .wb-fullscreen-overlay .tab-dash,
+        .wb-fullscreen-overlay .wb-action-bar,
+        .wb-fullscreen-overlay .wb-filter-bar,
+        .wb-fullscreen-overlay #wb-banner-master,
+        .wb-fullscreen-overlay .wb-banner { margin: 0 16px; }
+        .wb-fullscreen-overlay .wb-pane { padding: 12px 0 0; gap: 0; }
+        .wb-fullscreen-overlay .wb-pager { padding: 8px 16px; border-top: 1px solid var(--border); flex-shrink: 0; margin: 0; }
+        .wb-fullscreen-overlay .wb-legend { flex-shrink: 0; }
+
+        /* ── Misc ── */
+        .source-chip {
+            font-size: 0.74rem; font-weight: 600; padding: 4px 12px;
+            border-radius: 99px; background: var(--accent-light); color: var(--accent);
+        }
+        .btn-mc { font-size: 0.8rem; font-weight: 600; border-radius: 7px; padding: 6px 14px; }
+        .btn-mc-sm { font-size: 0.75rem; font-weight: 600; border-radius: 6px; padding: 4px 10px; }
+
+        /* Upload card */
+        .upload-card { background: #fff; border: 2px dashed var(--border); border-radius: var(--radius); padding: 20px; }
+        .upload-card:hover { border-color: var(--accent); }
+    </style>
+</head>
+<body>
+{% set nav_active = 'master_cashbook' %}
+{% set nav_master_cashbook_job_id = job_id %}
+{% set nav_extra_links = [] %}
+{% include 'partials/navbar.html' %}
+
+<div id="wb-col-filter-menu" class="col-filter-menu" role="dialog" aria-hidden="true">
+    <div class="cfm-header">
+        <span id="wb-cfm-title">Filter</span>
+        <button type="button" title="Close" onclick="closeColFilterMenu()">&times;</button>
+    </div>
+    <div class="cfm-actions">
+        <button type="button" onclick="colFilterMenuSelectAll()">Select all</button>
+        <button type="button" onclick="colFilterMenuClear()">Clear</button>
+    </div>
+    <div class="cfm-search">
+        <input type="text" id="wb-cfm-search" placeholder="Search values…" oninput="filterColFilterMenuOptions(this.value)">
+    </div>
+    <div class="cfm-options" id="wb-cfm-options"></div>
+    <div class="cfm-footer" id="wb-cfm-footer"></div>
+</div>
+
+<div class="page-header">
+    <div class="mc-container">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+            <div>
+                <h1><i class="fas fa-book-open me-2" style="color:#60a5fa"></i>Master Cashbook</h1>
+                <div class="sub">Job: <strong id="job-name" style="color:#e2e8f0">…</strong></div>
+            </div>
+            <div class="d-flex align-items-start gap-2 pt-1">
+                <a href="/reconciliation/{{ job_id }}" class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);font-size:.78rem">
+                    <i class="fas fa-arrow-left me-1"></i>Reconciliation
+                </a>
+                <a href="/prepare/{{ job_id }}" class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);font-size:.78rem">
+                    Prepare Files
+                </a>
+                <a href="/client-regions" class="btn btn-sm" style="background:rgba(255,255,255,.1);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);font-size:.78rem">
+                    Client Regions
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FULLSCREEN OVERLAY -->
+<div class="wb-fullscreen-overlay" id="wb-fs-overlay">
+    <div class="wb-fs-header">
+        <h2><i class="fas fa-table me-2" style="color:#60a5fa"></i>Workbook — <span id="wb-fs-job-name"></span></h2>
+        <div class="d-flex align-items-center gap-3">
+            <a class="btn btn-sm btn-success" id="wb-fs-download" href="/api/master-cashbook/{{ job_id }}/download-workbook">
+                <i class="fas fa-file-excel me-1"></i>Download workbook
+            </a>
+            <button class="btn btn-sm btn-outline-light" onclick="closeFullscreen()">
+                <i class="fas fa-compress-alt me-1"></i>Exit fullscreen
+            </button>
+        </div>
+    </div>
+    <div class="wb-fs-body">
+        <div class="wb-legend" id="wb-fs-legend"></div>
+        <div class="wb-tab-bar" id="wb-fs-tab-bar"></div>
+        <div id="wb-fs-tab-content" style="flex:1;overflow:hidden;display:flex;flex-direction:column"></div>
+    </div>
+</div>
+
+<div class="mc-container mb-5">
+
+    <!-- LOAD CASHBOOK -->
+    <div class="mc-card">
+        <div class="mc-card-header">
+            <h2><i class="fas fa-upload me-2 text-primary"></i>Load Cashbook</h2>
+        </div>
+        <div class="mc-card-body">
+            <p class="text-muted mb-3" style="font-size:.82rem">18-column per-subsidiary format: payment_date, client_id, billing_entity, account, location, invoice #, payment #, memo…</p>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-7 col-lg-6">
+                    <input type="file" class="form-control form-control-sm" id="cashbook-file" accept=".xlsx,.xls,.csv">
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary btn-mc w-100" id="btn-load" onclick="loadCashbook()">
+                        <i class="fas fa-database me-1"></i>Load cashbook
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-secondary btn-mc w-100" onclick="reassign()">
+                        <i class="fas fa-sync me-1"></i>Re-assign
+                    </button>
+                </div>
+            </div>
+            <div id="load-msg" class="mt-2"></div>
+        </div>
+    </div>
+
+    <!-- OVERVIEW STATS -->
+    <div id="overview-section" style="display:none">
+        <div class="stat-grid mb-4" id="stat-grid">
+            <div class="stat-tile accent">
+                <span class="st-label">Total rows</span>
+                <span class="st-value" id="stat-total">—</span>
+                <span class="st-sub" id="stat-file"></span>
+            </div>
+            <div class="stat-tile success">
+                <span class="st-label">Total amount</span>
+                <span class="st-value" id="stat-total-amount">—</span>
+                <span class="st-sub">Sum of cashbook amount</span>
+            </div>
+            <div class="stat-tile warning">
+                <span class="st-label">Unresolved</span>
+                <span class="st-value" id="stat-unresolved">—</span>
+                <span class="st-sub">No region assigned</span>
+            </div>
+            <div class="stat-tile info">
+                <span class="st-label">Corrections</span>
+                <span class="st-value" id="stat-corrected">—</span>
+                <span class="st-sub">Bank / entity fixed</span>
+            </div>
+            <div class="stat-tile danger" id="data-error-stat-wrap" style="display:none">
+                <span class="st-label">DATA ERROR rows</span>
+                <span class="st-value" id="stat-data-error">—</span>
+                <span class="st-sub" id="stat-data-error-unresolved"></span>
+            </div>
+            <div class="stat-tile">
+                <span class="st-label">Last loaded</span>
+                <span class="st-value" style="font-size:0.9rem;line-height:1.4" id="stat-uploaded">—</span>
+            </div>
+        </div>
+
+        <!-- ASSIGNMENT SOURCES -->
+        <div class="mc-card" id="sources-card">
+            <div class="mc-card-header"><h2>Assignment sources</h2></div>
+            <div class="mc-card-body py-3"><div id="sources-list" class="d-flex flex-wrap gap-2"></div></div>
+        </div>
+
+        <!-- WORKBOOK -->
+        <div class="wb-tabs-wrapper" id="workbook-card">
+            <div class="mc-card-header" style="border-radius:10px 10px 0 0">
+                <h2><i class="fas fa-table me-2 text-primary"></i>Workbook</h2>
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-mc btn-sm btn-outline-secondary" id="btn-update-all-wb" onclick="workbookUpdateAll(jobId, this)">
+                        <i class="fas fa-sync me-1"></i>Update all regions
+                    </button>
+                    <a class="btn btn-mc btn-sm btn-success" href="/api/master-cashbook/{{ job_id }}/download-workbook">
+                        <i class="fas fa-file-excel me-1"></i>Download workbook
+                    </a>
+                    <button type="button" class="btn btn-mc btn-sm btn-outline-primary" onclick="openFullscreen()" title="Fullscreen workbook">
+                        <i class="fas fa-expand-alt me-1"></i>Fullscreen
+                    </button>
+                </div>
+            </div>
+            <div class="wb-legend">
+                <div class="legend-item"><div class="legend-swatch" style="background:#fecaca;box-shadow:inset -3px 0 0 #dc2626"></div>Unusual matched to Stripe</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:#fed7aa"></div>Unusual transtype (unmatched)</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:#bfdbfe;box-shadow:inset -3px 0 0 #2563eb"></div>UK Bacs (WINSUCCESS / UKDDREJECT)</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:#ddd6fe;box-shadow:inset -3px 0 0 #7c3aed"></div>Partner Transfer (PARTNERTRANSFER)</div>
+                <div class="legend-item"><div class="legend-swatch" style="background:#a7f3d0;box-shadow:inset -3px 0 0 #059669"></div>SEPA Netting (paired SEPASUCCESS / SEPAREJECT)</div>
+            </div>
+            <div class="wb-tab-bar" id="wb-tab-bar"></div>
+            <div id="wb-tab-content"></div>
+        </div>
+
+        <!-- REGIONS -->
+        <div class="mc-card" id="regions-card">
+            <div class="mc-card-header">
+                <h2><i class="fas fa-globe me-2"></i>Split by region</h2>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-mc btn-sm btn-warning" onclick="feedAll()">
+                        <i class="fas fa-share-square me-1"></i>Feed all
+                    </button>
+                    <a class="btn btn-mc btn-sm btn-success" id="btn-download-all" href="/api/master-cashbook/{{ job_id }}/download-all">
+                        <i class="fas fa-file-archive me-1"></i>Download ZIP
+                    </a>
+                </div>
+            </div>
+            <div class="mc-card-body">
+                <div class="region-grid" id="region-buttons"></div>
+            </div>
+        </div>
+
+        <!-- REVIEW QUEUE -->
+        <div class="mc-card" id="issues-card" style="display:none">
+            <div class="mc-card-header">
+                <h2 style="color:#b45309"><i class="fas fa-exclamation-triangle me-2"></i>Review queue</h2>
+            </div>
+            <div style="overflow:auto">
+                <table class="wb-table w-100" style="border:none">
+                    <thead><tr>
+                        <th>Client</th><th>Billing</th><th>Location</th><th>Account</th><th>Region</th><th>Source</th><th>Note</th>
+                    </tr></thead>
+                    <tbody id="issues-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div><!-- /overview-section -->
+
+    <!-- Empty state -->
+    <div id="empty-state" style="display:none" class="text-center py-5">
+        <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+        <h4 class="text-muted">No cashbook loaded for this job</h4>
+        <p class="text-muted small">Upload a file above to get started.</p>
+    </div>
+
+</div><!-- /container -->
+
+<script src="{{ url_for('static', filename='js/workbook_actions.js') }}"></script>
+<script>
+const jobId = {{ job_id }};
+const REGIONS = [
+    { id: 1, label: 'AU', tabKey: 'au' },
+    { id: 2, label: 'CA', tabKey: 'ca' },
+    { id: 3, label: 'US', tabKey: 'us' },
+    { id: 4, label: 'EU', tabKey: 'eu' },
+    { id: 5, label: 'UK', tabKey: 'uk' },
+];
+const WB_COLS = [
+    ['payment_date','Date'], ['client_id','Client'], ['invoice_number','Invoice'],
+    ['billing_entity','Billing'], ['currency','Curr'], ['amount','Amount'],
+    ['account','Account'], ['location','Location'], ['transtype','Type'],
+    ['payment_hash','Payment #'], ['reasoncode','Reason'],
+];
+const WB_AMOUNT_COL = 'amount';
+const WB_DATE_COL   = 'payment_date';
+
+let wbLoadedTabs = new Set();
+const wbUnusualFilter = {};
+const wbSortState   = {};   // tabKey -> { col, dir }
+const wbColFilters  = {};   // tabKey -> { colKey: string[], … }
+const wbColValuesCache = {};
+const wbColFilterMenu = { tabKey: null, col: null, values: [] };
+const wbGSearch     = {};   // tabKey -> string
+const wbSearchTimers = {};  // debounce
+let wbActiveKey = null;
+let wbSummaryData = null;
+const regionJournalCache = {};
+
+const SUBSIDIARY_CURRENCY = { 1: 'AUD', 2: 'CAD', 3: 'USD', 4: 'EUR', 5: 'GBP' };
+const SUBSIDIARY_SYMBOL   = { 1: '$', 2: '$', 3: '$', 4: '€', 5: '£' };
+
+window.onWorkbookActionComplete = function() {
+    wbLoadedTabs.clear();
+    refreshWorkbookSummary().then(() => refreshStatus()).catch(console.warn);
+};
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function esc(s) {
+    if (s == null) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+}
+function fmt(n, currency) {
+    const num = Number(n);
+    if (Number.isNaN(num)) return '—';
+    const sign = num < 0 ? '-' : '';
+    const sym = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
+    return sign + sym + Math.abs(num).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtMoney(n) { return fmt(n, null); }
+function fmtDate(s) {
+    if (!s) return '';
+    const d = new Date(s);
+    return isNaN(d) ? s : d.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric' });
+}
+
+// ── status render ─────────────────────────────────────────────────────────────
+function renderStatus(data) {
+    const hasRows = data.total_rows > 0;
+    document.getElementById('overview-section').style.display = hasRows ? '' : 'none';
+    document.getElementById('empty-state').style.display = hasRows ? 'none' : '';
+
+    document.getElementById('job-name').textContent = data.job_name || ('Job ' + jobId);
+    document.getElementById('stat-total').textContent = data.total_rows ?? '—';
+    document.getElementById('stat-total-amount').textContent =
+        data.total_amount != null ? fmtMoney(data.total_amount) : '—';
+    document.getElementById('stat-unresolved').textContent = data.unresolved_rows ?? '—';
+    document.getElementById('stat-corrected').textContent = data.fields_corrected_rows ?? '—';
+
+    const deWrap = document.getElementById('data-error-stat-wrap');
+    if (data.data_error_rows > 0) {
+        deWrap.style.display = '';
+        document.getElementById('stat-data-error').textContent = data.data_error_rows;
+        const unr = data.data_error_unresolved || 0;
+        document.getElementById('stat-data-error-unresolved').textContent =
+            unr ? `${unr} unresolved` : 'All assigned';
+    } else {
+        deWrap.style.display = 'none';
+    }
+
+    const up = data.last_upload_at ? new Date(data.last_upload_at) : null;
+    document.getElementById('stat-uploaded').textContent = up
+        ? up.toLocaleDateString(undefined, { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '—';
+    document.getElementById('stat-file').textContent = data.filename ? data.filename : '';
+
+    // sources
+    const srcEl = document.getElementById('sources-list');
+    srcEl.innerHTML = '';
+    Object.entries(data.by_assignment_source || {}).sort().forEach(([k,v]) => {
+        srcEl.innerHTML += `<span class="source-chip">${esc(k)}: ${v}</span>`;
+    });
+
+    // region cards
+    const rb = document.getElementById('region-buttons');
+    rb.innerHTML = '';
+    const byReg = data.by_region || {};
+    const byAmt = data.by_region_amount || {};
+    const feed  = data.feed_status || {};
+    const wbByR = (data.workbook_summary || {}).by_region || {};
+    REGIONS.forEach(r => {
+        const count = byReg[r.label] || 0;
+        const amt   = byAmt[r.label];
+        const fs    = feed[r.label] || {};
+        const wbR   = wbByR[r.label] || {};
+        const fedIcon = fs.fed
+            ? '<i class="fas fa-check-circle text-success"></i>'
+            : '<i class="fas fa-circle text-secondary" style="opacity:.35"></i>';
+        const wbIcon = wbR.workbook_rows
+            ? '<i class="fas fa-table text-primary"></i>'
+            : '<i class="fas fa-table" style="color:#d1d5db"></i>';
+        rb.innerHTML += `
+        <div class="region-card">
+            <div class="rc-header">
+                <span class="rc-label">${r.label}</span>
+                <span class="rc-flag">${count} rows</span>
+            </div>
+            <div class="rc-amount">${amt != null ? fmtMoney(amt) : '$0.00'}</div>
+            <div class="rc-meta">
+                <span>${fedIcon} ${fs.fed ? 'Fed — ' + fs.cashbook_transaction_rows + ' in recon' : 'Not fed yet'}</span>
+                <span>${wbIcon} ${wbR.workbook_rows ? wbR.workbook_rows + ' in Stripe Import tab' : 'No workbook rows yet'}</span>
+            </div>
+            <div class="rc-actions">
+                <a class="btn btn-mc-sm btn-outline-primary" href="/api/master-cashbook/${jobId}/download/${r.id}">
+                    <i class="fas fa-download me-1"></i>Download
+                </a>
+                <button class="btn btn-mc-sm btn-outline-warning" onclick="feedRegion(${r.id},'${r.label}')">
+                    <i class="fas fa-share-square me-1"></i>Feed
+                </button>
+                <button class="btn btn-mc-sm btn-info text-white" onclick="workbookUpdate(${jobId},${r.id},this)">
+                    <i class="fas fa-sync me-1"></i>Update
+                </button>
+                <button class="btn btn-mc-sm btn-outline-danger" onclick="workbookRerun(${jobId},${r.id},'${r.label}',this)">
+                    <i class="fas fa-redo me-1"></i>Rerun
+                </button>
+            </div>
+        </div>`;
+    });
+
+    loadPreview();
+    if (hasRows) refreshWorkbookSummary().catch(console.warn);
+}
+
+// ── workbook tabs ─────────────────────────────────────────────────────────────
+async function refreshWorkbookSummary() {
+    const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/summary`);
+    const data = await res.json();
+    if (!data.success) return;
+    wbSummaryData = data;
+    renderWorkbookTabs(data);
+}
+
+function renderWorkbookTabs(summary) {
+    const barEl     = document.getElementById('wb-tab-bar');
+    const contentEl = document.getElementById('wb-tab-content');
+    const prevKey   = wbActiveKey || (summary.tabs[0] && summary.tabs[0].key);
+    barEl.innerHTML     = '';
+    contentEl.innerHTML = '';
+    wbLoadedTabs.clear();
+
+    summary.tabs.forEach((tab, idx) => {
+        const isActive = tab.key === prevKey || (!prevKey && idx === 0);
+        if (isActive) wbActiveKey = tab.key;
+
+        const unusualBadge = (tab.unusual_matched_count || 0) > 0
+            ? `<span class="tb-unusual">${tab.unusual_matched_count} !</span>` : '';
+        const bacsBadge = tab.key === 'uk_bacs'
+            ? `<span class="tb-bacs">BACS</span>` : '';
+        const partnerBadge = tab.key === 'partner_transfer'
+            ? `<span class="tb-bacs" style="background:#f5f3ff;color:#7c3aed">PT</span>` : '';
+        const sepaBadge = tab.key === 'sepa_netting'
+            ? `<span class="tb-bacs" style="background:#ecfdf5;color:#059669">SEPA</span>` : '';
+
+        barEl.innerHTML += `
+            <button class="wb-tab-btn${isActive ? ' active' : ''}"
+                    data-tab-key="${tab.key}" onclick="switchTab('${tab.key}')">
+                ${esc(tab.label)}
+                <span class="tb-count">${tab.count}</span>
+                ${unusualBadge}${bacsBadge}${partnerBadge}${sepaBadge}
+            </button>`;
+
+        contentEl.innerHTML += `
+            <div class="wb-pane${isActive ? ' active' : ''}" id="wb-pane-${tab.key}" data-tab-key="${tab.key}">
+                ${buildPaneShell(tab)}
+            </div>`;
+    });
+
+    if (wbActiveKey) loadWorkbookTab(wbActiveKey, 1);
+}
+
+function buildPaneShell(tab) {
+    const sid = tab.subsidiary_id;
+    const ukCandidates = tab.uk_bacs_candidates || 0;
+    const ukTotal      = tab.uk_bacs_total || 0;
+    const ptCandidates = tab.partner_transfer_candidates || 0;
+    const ptTotal      = tab.partner_transfer_total || 0;
+    const sepaCandidates = tab.sepa_netting_candidates || 0;
+    const sepaTotal      = tab.sepa_netting_total || 0;
+    const sepaPairs      = tab.sepa_netting_pairs_total || Math.floor(sepaTotal / 2);
+    const unmatchedSepa  = tab.unmatched_separeject || 0;
+    const unusualTotal = tab.unusual_transtype_count || 0;
+    const filterDisabled = unusualTotal === 0 ? ' disabled' : '';
+
+    const masterActionBar = tab.key === 'master' ? `
+        <div class="wb-action-bar bacs">
+            <button class="btn btn-mc-sm btn-primary" id="btn-check-uk-bacs" onclick="checkUkBacsTranstypes(this)">
+                <i class="fas fa-search me-1"></i>Check for UK Bacs transtypes
+            </button>
+            <span style="font-size:.79rem;color:#1e40af">
+                ${ukCandidates > 0
+                    ? `<strong>${ukCandidates}</strong> WINSUCCESS / UKDDREJECT rows ready to move`
+                    : ukTotal > 0
+                        ? `<i class="fas fa-check me-1"></i>${ukTotal} rows already in UK Bacs tab`
+                        : 'Finds WINSUCCESS &amp; UKDDREJECT and moves them to the UK Bacs tab'}
+            </span>
+        </div>
+        <div class="wb-action-bar partner">
+            <button class="btn btn-mc-sm btn-primary" id="btn-check-partner-transfer" style="background:#7c3aed;border-color:#7c3aed" onclick="checkPartnerTransferTranstypes(this)">
+                <i class="fas fa-search me-1"></i>Check for Partner Transfer
+            </button>
+            <span style="font-size:.79rem;color:#5b21b6">
+                ${ptCandidates > 0
+                    ? `<strong>${ptCandidates}</strong> PARTNERTRANSFER row(s) ready to move`
+                    : ptTotal > 0
+                        ? `<i class="fas fa-check me-1"></i>${ptTotal} rows already in Partner Transfer tab`
+                        : 'Finds PARTNERTRANSFER transtype and moves them to the Partner Transfer tab'}
+            </span>
+        </div>
+        <div class="wb-action-bar sepa" style="background:#ecfdf5;border-color:#a7f3d0">
+            <button class="btn btn-mc-sm btn-primary" id="btn-check-sepa-netting" style="background:#059669;border-color:#059669" onclick="checkSepaNetting(this)">
+                <i class="fas fa-balance-scale me-1"></i>Check SEPA netting pairs
+            </button>
+            <span style="font-size:.79rem;color:#047857">
+                ${sepaCandidates > 0
+                    ? `<strong>${sepaCandidates}</strong> pair(s) ready to move (${sepaCandidates * 2} rows)`
+                    : sepaTotal > 0
+                        ? `<i class="fas fa-check me-1"></i>${sepaPairs} pair(s) in SEPA Netting tab (${sepaTotal} rows)${unmatchedSepa > 0 ? ` — <strong>${unmatchedSepa}</strong> unmatched SEPAREJECT` : ''}`
+                        : 'Pairs SEPAREJECT with SEPASUCCESS (same client + amount) and moves both to SEPA Netting tab'}
+            </span>
+        </div>` : '';
+
+    const regionActionBar = sid ? `
+        <div class="wb-action-bar region">
+            <button class="btn btn-mc-sm btn-success" onclick="workbookUpdate(${jobId},${sid},this)">
+                <i class="fas fa-sync me-1"></i>Update ${tab.label.replace(' Stripe Import','')}
+            </button>
+            <button class="btn btn-mc-sm btn-outline-warning" onclick="workbookClear(${jobId},${sid},'${tab.label.replace(' Stripe Import','')}',this)">
+                <i class="fas fa-eraser me-1"></i>Clear
+            </button>
+            <button class="btn btn-mc-sm btn-outline-danger" onclick="workbookRerun(${jobId},${sid},'${tab.label.replace(' Stripe Import','')}',this)">
+                <i class="fas fa-redo me-1"></i>Rerun
+            </button>
+        </div>` : '';
+
+    const regionJournalsPanel = sid ? `
+        <div class="wb-journals-panel" id="wb-journals-${tab.key}">
+            <div class="wb-journals-header">
+                <span><i class="fas fa-file-invoice me-1 text-primary"></i>Stripe Journals</span>
+            </div>
+            <div class="wb-journals-body text-muted small">
+                <i class="fas fa-circle-notch fa-spin me-1"></i>Loading journals…
+            </div>
+        </div>` : '';
+
+    const ukBacsNote = tab.key === 'uk_bacs' ? `
+        <div class="wb-banner filter">
+            <i class="fas fa-university"></i>
+            UK Bacs — transtypes <strong>WINSUCCESS</strong> and <strong>UKDDREJECT</strong> only.
+        </div>` : '';
+
+    const partnerTransferNote = tab.key === 'partner_transfer' ? `
+        <div class="wb-banner filter" style="background:#f5f3ff;border-color:#ddd6fe;color:#5b21b6">
+            <i class="fas fa-exchange-alt"></i>
+            Partner Transfer — transtype <strong>PARTNERTRANSFER</strong> only. Not fed to regional cashbooks.
+        </div>` : '';
+
+    const sepaNettingNote = tab.key === 'sepa_netting' ? `
+        <div class="wb-banner filter" style="background:#ecfdf5;border-color:#a7f3d0;color:#047857">
+            <i class="fas fa-balance-scale"></i>
+            SEPA Netting — paired <strong>SEPASUCCESS</strong> / <strong>SEPAREJECT</strong> rows that net to zero. Not fed to regional cashbooks.
+        </div>` : '';
+
+    return `
+        ${masterActionBar}
+        ${regionActionBar}
+        ${regionJournalsPanel}
+        ${ukBacsNote}
+        ${partnerTransferNote}
+        ${sepaNettingNote}
+        <div id="wb-dash-${tab.key}"></div>
+
+        <div class="wb-filter-bar">
+            <div class="form-check form-switch mb-0 d-flex align-items-center gap-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="wb-filter-${tab.key}"${filterDisabled}
+                    onchange="toggleUnusualFilter('${tab.key}')">
+                <label class="form-check-label" for="wb-filter-${tab.key}">
+                    Show unusual only
+                    ${unusualTotal > 0 ? `<span class="flag unusual-type ms-1">${unusualTotal}</span>` : ''}
+                </label>
+            </div>
+        </div>
+
+        <div id="wb-banner-${tab.key}"></div>
+
+        <div class="wb-active-filters" id="wb-active-filters-${tab.key}"></div>
+
+        <div class="wb-search-bar">
+            <i class="fas fa-search" style="color:var(--muted);font-size:.8rem;flex-shrink:0"></i>
+            <input type="text" placeholder="Search billing, transtype, location, account, currency, payment #…"
+                id="wb-gsearch-${tab.key}"
+                oninput="debounceSearch('${tab.key}')">
+            <span class="filter-active-badge" id="wb-filter-badge-${tab.key}" style="display:none">
+                <i class="fas fa-filter me-1"></i>Filtered
+            </span>
+            <button class="clear-btn" onclick="clearAllFilters('${tab.key}')">
+                <i class="fas fa-times me-1"></i>Clear all
+            </button>
+        </div>
+
+        <div class="wb-table-wrap">
+            <table class="wb-table" id="wb-table-${tab.key}">
+                <thead>
+                    <tr class="sort-row" id="wb-sort-row-${tab.key}"></tr>
+                </thead>
+                <tbody id="wb-tbody-${tab.key}">
+                    <tr><td colspan="${WB_COLS.length + 1}" class="text-center text-muted py-4">
+                        <i class="fas fa-circle-notch fa-spin me-2"></i>Loading…
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="wb-pager" id="wb-pager-${tab.key}"></div>`;
+}
+
+function switchTab(key) {
+    closeColFilterMenu();
+    wbActiveKey = key;
+    document.querySelectorAll('.wb-tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tabKey === key));
+    document.querySelectorAll('.wb-pane').forEach(p =>
+        p.classList.toggle('active', p.dataset.tabKey === key));
+    loadWorkbookTab(key, 1);
+}
+
+function toggleUnusualFilter(tabKey) {
+    const cb = document.getElementById(`wb-filter-${tabKey}`);
+    wbUnusualFilter[tabKey] = cb && cb.checked;
+    loadWorkbookTab(tabKey, 1);
+}
+
+// ── sort ──────────────────────────────────────────────────────────────────────
+function sortCol(tabKey, col, ev) {
+    if (ev) ev.stopPropagation();
+    closeColFilterMenu();
+    const cur = wbSortState[tabKey] || {};
+    const dir = (cur.col === col && cur.dir === 'asc') ? 'desc' : 'asc';
+    wbSortState[tabKey] = { col, dir };
+    updateSortHeaders(tabKey);
+    loadWorkbookTab(tabKey, 1);
+}
+
+function updateSortHeaders(tabKey) {
+    const sortRow = document.getElementById(`wb-sort-row-${tabKey}`);
+    if (!sortRow) return;
+    const { col, dir } = wbSortState[tabKey] || {};
+    sortRow.querySelectorAll('.th-inner').forEach(el => {
+        const c = el.dataset.col;
+        if (!c) return;
+        el.classList.toggle('sorted-asc',  c === col && dir === 'asc');
+        el.classList.toggle('sorted-desc', c === col && dir === 'desc');
+        const icon = el.querySelector('.sort-icon');
+        if (icon) icon.className = `sort-icon fas ${c===col ? (dir==='asc'?'fa-sort-up':'fa-sort-down') : 'fa-sort'}`;
+    });
+}
+
+// ── column filters (multi-select via header click) ───────────────────────────
+function getColFilterValues(tabKey, col) {
+    const f = wbColFilters[tabKey] || {};
+    const v = f[col];
+    if (Array.isArray(v)) return v;
+    if (v) return [String(v)];
+    return [];
+}
+
+function hasActiveColFilters(tabKey) {
+    return Object.values(wbColFilters[tabKey] || {}).some(v =>
+        Array.isArray(v) ? v.length > 0 : !!v
+    );
+}
+
+function colLabel(colKey) {
+    const found = WB_COLS.find(c => c[0] === colKey);
+    return found ? found[1] : colKey;
+}
+
+function buildFilterParams(tabKey, includePage=false, page=1) {
+    const params = new URLSearchParams();
+    if (includePage) {
+        params.set('page', page);
+        params.set('per_page', 100);
+    }
+    if (wbUnusualFilter[tabKey]) params.set('unusual_only', '1');
+    const gSearch = wbGSearch[tabKey] || '';
+    if (gSearch) params.set('q', gSearch);
+    const cFilts = wbColFilters[tabKey] || {};
+    const active = {};
+    Object.entries(cFilts).forEach(([col, val]) => {
+        const arr = Array.isArray(val) ? val.filter(Boolean) : (val ? [val] : []);
+        if (arr.length) active[col] = arr;
+    });
+    if (Object.keys(active).length) params.set('filters', JSON.stringify(active));
+    const sort = wbSortState[tabKey] || {};
+    if (sort.col) { params.set('sort_by', sort.col); params.set('sort_dir', sort.dir || 'asc'); }
+    return params;
+}
+
+function renderActiveFilterChips(tabKey) {
+    const el = document.getElementById(`wb-active-filters-${tabKey}`);
+    if (!el) return;
+    const filters = wbColFilters[tabKey] || {};
+    const chips = Object.entries(filters)
+        .map(([col, val]) => {
+            const arr = Array.isArray(val) ? val.filter(Boolean) : (val ? [val] : []);
+            if (!arr.length) return '';
+            const preview = arr.length === 1
+                ? esc(String(arr[0]).slice(0, 28))
+                : `${arr.length} selected`;
+            return `<span class="active-filter-chip">${esc(colLabel(col))}: ${preview}
+                <button type="button" title="Clear ${esc(colLabel(col))}" onclick="clearColFilter('${tabKey}','${col}')">&times;</button>
+            </span>`;
+        })
+        .filter(Boolean)
+        .join('');
+    el.innerHTML = chips;
+}
+
+function updateFilterHeaderStates(tabKey) {
+    const sortRow = document.getElementById(`wb-sort-row-${tabKey}`);
+    if (!sortRow) return;
+    sortRow.querySelectorAll('.th-inner[data-col]').forEach(el => {
+        const col = el.dataset.col;
+        const count = getColFilterValues(tabKey, col).length;
+        el.classList.toggle('filter-active', count > 0);
+        const icon = el.querySelector('.filter-icon');
+        if (icon) icon.classList.toggle('inactive', count === 0);
+    });
+}
+
+async function openColFilterMenu(tabKey, col, anchorEl) {
+    if (wbColFilterMenu.tabKey === tabKey && wbColFilterMenu.col === col) {
+        closeColFilterMenu();
+        return;
+    }
+    wbColFilterMenu.tabKey = tabKey;
+    wbColFilterMenu.col = col;
+
+    const menu = document.getElementById('wb-col-filter-menu');
+    const title = document.getElementById('wb-cfm-title');
+    const optsEl = document.getElementById('wb-cfm-options');
+    const searchEl = document.getElementById('wb-cfm-search');
+    const footerEl = document.getElementById('wb-cfm-footer');
+    if (!menu || !optsEl) return;
+
+    title.textContent = `Filter: ${colLabel(col)}`;
+    searchEl.value = '';
+    optsEl.innerHTML = '<div class="cfm-empty"><i class="fas fa-circle-notch fa-spin me-1"></i>Loading…</div>';
+    footerEl.textContent = '';
+    menu.classList.add('open');
+    menu.setAttribute('aria-hidden', 'false');
+    positionColFilterMenu(anchorEl);
+
+    try {
+        const params = buildFilterParams(tabKey, false);
+        const res = await fetch(`/api/master-cashbook/${jobId}/workbook/${tabKey}/column-values/${col}?${params}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed');
+        wbColValuesCache[`${tabKey}:${col}`] = data.values || [];
+        wbColFilterMenu.values = data.values || [];
+        renderColFilterMenuOptions(tabKey, col, '');
+        footerEl.textContent = data.truncated
+            ? `Showing first ${(data.values || []).length} values`
+            : `${(data.values || []).length} value(s)`;
+    } catch (e) {
+        optsEl.innerHTML = `<div class="cfm-empty text-danger">${esc(e.message || 'Failed to load')}</div>`;
+    }
+}
+
+function positionColFilterMenu(anchorEl) {
+    const menu = document.getElementById('wb-col-filter-menu');
+    if (!menu || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const menuW = menu.offsetWidth || 260;
+    let left = rect.left;
+    if (left + menuW > window.innerWidth - 12) left = window.innerWidth - menuW - 12;
+    if (left < 8) left = 8;
+    let top = rect.bottom + 4;
+    const menuH = menu.offsetHeight || 320;
+    if (top + menuH > window.innerHeight - 12) top = Math.max(8, rect.top - menuH - 4);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+}
+
+function renderColFilterMenuOptions(tabKey, col, searchTerm) {
+    const optsEl = document.getElementById('wb-cfm-options');
+    if (!optsEl) return;
+    const selected = new Set(getColFilterValues(tabKey, col));
+    const term = (searchTerm || '').trim().toLowerCase();
+    const values = (wbColFilterMenu.values || []).filter(v => {
+        if (!term) return true;
+        return String(v).toLowerCase().includes(term);
+    });
+
+    if (!values.length) {
+        optsEl.innerHTML = '<div class="cfm-empty">No matching values</div>';
+        return;
+    }
+
+    optsEl.innerHTML = values.map((v, idx) => {
+        const sv = String(v);
+        const checked = selected.has(sv) ? ' checked' : '';
+        const label = sv.length > 48 ? sv.slice(0, 48) + '…' : sv;
+        return `<label class="cfm-option" title="${esc(sv)}">
+            <input type="checkbox"${checked}
+                onchange="toggleColFilterValueByIdx('${tabKey}','${col}',${idx},this.checked)">
+            <span>${esc(label)}</span>
+        </label>`;
+    }).join('');
+}
+
+function toggleColFilterValueByIdx(tabKey, col, idx, checked) {
+    const searchEl = document.getElementById('wb-cfm-search');
+    const term = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const values = (wbColFilterMenu.values || []).filter(v =>
+        !term || String(v).toLowerCase().includes(term)
+    );
+    const value = values[idx];
+    if (value == null) return;
+    toggleColFilterValue(tabKey, col, String(value), checked);
+}
+
+function filterColFilterMenuOptions(term) {
+    const { tabKey, col } = wbColFilterMenu;
+    if (!tabKey || !col) return;
+    renderColFilterMenuOptions(tabKey, col, term);
+}
+
+function closeColFilterMenu() {
+    const menu = document.getElementById('wb-col-filter-menu');
+    if (menu) {
+        menu.classList.remove('open');
+        menu.setAttribute('aria-hidden', 'true');
+    }
+    wbColFilterMenu.tabKey = null;
+    wbColFilterMenu.col = null;
+    wbColFilterMenu.values = [];
+}
+
+function colFilterMenuSelectAll() {
+    const { tabKey, col } = wbColFilterMenu;
+    if (!tabKey || !col) return;
+    const searchEl = document.getElementById('wb-cfm-search');
+    const term = searchEl ? searchEl.value.trim().toLowerCase() : '';
+    const values = (wbColFilterMenu.values || []).filter(v =>
+        !term || String(v).toLowerCase().includes(term)
+    );
+    if (!wbColFilters[tabKey]) wbColFilters[tabKey] = {};
+    wbColFilters[tabKey][col] = values.map(String);
+    applyColFilterChange(tabKey, col);
+    renderColFilterMenuOptions(tabKey, col, searchEl ? searchEl.value : '');
+}
+
+function colFilterMenuClear() {
+    const { tabKey, col } = wbColFilterMenu;
+    if (!tabKey || !col) return;
+    clearColFilter(tabKey, col, false);
+    const searchEl = document.getElementById('wb-cfm-search');
+    renderColFilterMenuOptions(tabKey, col, searchEl ? searchEl.value : '');
+}
+
+function toggleColFilterValue(tabKey, col, value, checked) {
+    if (!wbColFilters[tabKey]) wbColFilters[tabKey] = {};
+    let arr = getColFilterValues(tabKey, col);
+    if (checked) {
+        if (!arr.includes(value)) arr = [...arr, value];
+    } else {
+        arr = arr.filter(v => v !== value);
+    }
+    if (arr.length) wbColFilters[tabKey][col] = arr;
+    else delete wbColFilters[tabKey][col];
+    applyColFilterChange(tabKey, col);
+}
+
+function clearColFilter(tabKey, col, closeMenu=true) {
+    if (wbColFilters[tabKey]) delete wbColFilters[tabKey][col];
+    delete wbColValuesCache[`${tabKey}:${col}`];
+    applyColFilterChange(tabKey, col);
+    if (closeMenu) closeColFilterMenu();
+}
+
+async function applyColFilterChange(tabKey, changedCol) {
+    renderActiveFilterChips(tabKey);
+    updateFilterHeaderStates(tabKey);
+    updateFilterBadge(tabKey);
+    clearTimeout(wbSearchTimers[tabKey + '_col']);
+    wbSearchTimers[tabKey + '_col'] = setTimeout(async () => {
+        await refreshOpenColFilterMenu(tabKey, changedCol);
+        loadWorkbookTab(tabKey, 1);
+    }, 150);
+}
+
+async function refreshOpenColFilterMenu(tabKey, changedCol) {
+    if (wbColFilterMenu.tabKey !== tabKey) return;
+    const openCol = wbColFilterMenu.col;
+    if (!openCol) return;
+    try {
+        const params = buildFilterParams(tabKey, false);
+        const res = await fetch(`/api/master-cashbook/${jobId}/workbook/${tabKey}/column-values/${openCol}?${params}`);
+        const data = await res.json();
+        if (data.success) {
+            wbColValuesCache[`${tabKey}:${openCol}`] = data.values || [];
+            wbColFilterMenu.values = data.values || [];
+            const searchEl = document.getElementById('wb-cfm-search');
+            renderColFilterMenuOptions(tabKey, openCol, searchEl ? searchEl.value : '');
+        }
+    } catch (e) {
+        console.warn(e);
+    }
+}
+
+function debounceSearch(tabKey) {
+    const el = document.getElementById(`wb-gsearch-${tabKey}`);
+    wbGSearch[tabKey] = el ? el.value.trim() : '';
+    updateFilterBadge(tabKey);
+    clearTimeout(wbSearchTimers[tabKey]);
+    wbSearchTimers[tabKey] = setTimeout(() => loadWorkbookTab(tabKey, 1), 350);
+}
+
+function updateFilterBadge(tabKey) {
+    const badge = document.getElementById(`wb-filter-badge-${tabKey}`);
+    if (!badge) return;
+    const hasCol = hasActiveColFilters(tabKey);
+    const hasG   = !!(wbGSearch[tabKey]);
+    badge.style.display = (hasCol || hasG) ? '' : 'none';
+}
+
+function clearAllFilters(tabKey) {
+    wbColFilters[tabKey] = {};
+    wbGSearch[tabKey] = '';
+    const gs = document.getElementById(`wb-gsearch-${tabKey}`);
+    if (gs) gs.value = '';
+    closeColFilterMenu();
+    renderActiveFilterChips(tabKey);
+    updateFilterHeaderStates(tabKey);
+    updateFilterBadge(tabKey);
+    loadWorkbookTab(tabKey, 1);
+}
+
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('wb-col-filter-menu');
+    if (!menu || !menu.classList.contains('open')) return;
+    if (menu.contains(e.target)) return;
+    if (e.target.closest('.th-label')) return;
+    closeColFilterMenu();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeColFilterMenu();
+});
+
+// ── build header rows ─────────────────────────────────────────────────────────
+function buildTableHeaders(tabKey, force=false) {
+    const sortRow = document.getElementById(`wb-sort-row-${tabKey}`);
+    if (!sortRow) return;
+    if (!force && sortRow.children.length) return;
+    const { col: sortCol_, dir } = wbSortState[tabKey] || {};
+    const ALL_COLS = [...WB_COLS, ['_flag', 'Flag']];
+
+    sortRow.innerHTML = ALL_COLS.map(([c, label]) => {
+        if (c === '_flag') return `<th><div class="th-inner" style="cursor:default">${label}</div></th>`;
+        const isSorted = c === sortCol_;
+        const iconCls  = isSorted ? (dir==='asc' ? 'fa-sort-up' : 'fa-sort-down') : 'fa-sort';
+        const activeCls = isSorted ? (dir==='asc' ? ' sorted-asc' : ' sorted-desc') : '';
+        const filterCount = getColFilterValues(tabKey, c).length;
+        const filterActiveCls = filterCount ? ' filter-active' : '';
+        const filterIconCls = filterCount ? '' : ' inactive';
+        return `<th><div class="th-inner${activeCls}${filterActiveCls}" data-col="${c}">
+            <span class="th-label" onclick="openColFilterMenu('${tabKey}','${c}',this)">${label}</span>
+            <span class="th-actions">
+                <i class="filter-icon fas fa-filter${filterIconCls}"></i>
+                <i class="sort-icon fas ${iconCls}" onclick="sortCol('${tabKey}','${c}',event)"></i>
+            </span>
+        </div></th>`;
+    }).join('');
+
+    renderActiveFilterChips(tabKey);
+}
+
+// ── region stripe journals ───────────────────────────────────────────────────
+function getSubsidiaryIdForTab(tabKey) {
+    const r = REGIONS.find(x => x.tabKey === tabKey);
+    return r ? r.id : null;
+}
+
+function journalDisplayMeta(journalName, subsidiaryId) {
+    const isAED = journalName.includes('_AED');
+    let label = journalName;
+    let badgeClass = 'main';
+
+    if (journalName.includes('Refunds_Cross_Subsidiary')) {
+        label = 'Cross-Subsidiary Refunds';
+        badgeClass = 'refunds';
+    } else if (journalName.includes('Refunds')) {
+        label = 'Refunds (Double-Entry)';
+        badgeClass = 'refunds';
+    } else if (journalName.includes('POA')) {
+        label = 'POA';
+        badgeClass = 'poa';
+    } else if (journalName.includes('Main')) {
+        label = 'Main';
+        badgeClass = 'main';
+    } else if (journalName.includes('Cross_Subsidiary')) {
+        label = 'Cross-Subsidiary';
+        badgeClass = 'cross';
+    }
+
+    let currency = SUBSIDIARY_CURRENCY[subsidiaryId] || 'USD';
+    let symbol = SUBSIDIARY_SYMBOL[subsidiaryId] || '$';
+    if (subsidiaryId === 4) {
+        currency = isAED ? 'AED' : 'EUR';
+        symbol = isAED ? '' : '€';
+    }
+
+    const currBadge = `<span class="wb-journals-badge curr">${currency}</span>`;
+    return {
+        label,
+        badgeClass,
+        currency,
+        symbol,
+        html: `<span class="wb-journals-badge ${badgeClass}">${esc(label)}</span>${currBadge}`,
+    };
+}
+
+function formatJournalAmount(total, journalName, subsidiaryId, symbol) {
+    const isRefund = journalName.includes('Refunds');
+    const signed = isRefund ? -Math.abs(Number(total) || 0) : Number(total) || 0;
+    const absVal = Math.abs(signed).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const prefix = signed < 0 ? '(' + (symbol || '') + absVal + ')' : (symbol || '') + absVal;
+    return prefix;
+}
+
+function renderRegionJournalsPanel(panel, subsidiaryId, tabKey, cache) {
+    const body = panel.querySelector('.wb-journals-body');
+    if (!body) return;
+
+    if (cache.state === 'matching') {
+        body.innerHTML = `
+            <div class="wb-journals-info">
+                <i class="fas fa-info-circle me-1"></i>
+                Complete reconciliation (Processes 1–3) for this region first.
+                <a href="/reconciliation/${jobId}/${subsidiaryId}" class="ms-1">Go to reconciliation</a>
+            </div>`;
+        return;
+    }
+
+    if (cache.state === 'not_synced') {
+        const url = cache.status?.journal_prep_url || `/journal-preparation/${jobId}/${subsidiaryId}`;
+        body.innerHTML = `
+            <div class="wb-journals-info">
+                <i class="fas fa-info-circle me-1"></i>
+                Sync journals in Journal Preparation before downloading.
+                <a href="${esc(url)}" class="ms-1">Open Journal Preparation</a>
+            </div>`;
+        return;
+    }
+
+    if (cache.state === 'error') {
+        body.innerHTML = `<div class="alert alert-danger mb-0 py-2">${esc(cache.error || 'Failed to load journals')}</div>`;
+        return;
+    }
+
+    const memo = cache.status?.memo || '';
+    const journals = cache.preview?.summary?.journals || {};
+    const entries = Object.entries(journals);
+    if (!entries.length) {
+        body.innerHTML = `<div class="text-muted small">No journal splits available for this region.</div>`;
+        return;
+    }
+
+    const memoLine = memo
+        ? `<span class="memo-line">Memo: <strong>${esc(memo)}</strong></span>`
+        : `<span class="memo-line text-muted">No memo set</span>`;
+
+    const rows = entries.map(([journalName, info]) => {
+        const meta = journalDisplayMeta(journalName, subsidiaryId);
+        const amount = formatJournalAmount(info.total, journalName, subsidiaryId, meta.symbol);
+        return `<tr>
+            <td>${meta.html}<div class="text-muted" style="font-size:.68rem;margin-top:2px">${esc(journalName)}</div></td>
+            <td class="text-center">${(info.count || 0).toLocaleString()}</td>
+            <td class="text-end">${amount}</td>
+            <td class="text-end">
+                <button class="btn btn-mc-sm btn-outline-primary" onclick="downloadRegionJournal(${subsidiaryId}, ${JSON.stringify(journalName)})">
+                    <i class="fas fa-download"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    body.innerHTML = `
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            ${memoLine}
+            <div class="d-flex gap-2">
+                <button class="btn btn-mc-sm btn-outline-secondary" onclick="refreshRegionJournals(${subsidiaryId}, '${tabKey}')">
+                    <i class="fas fa-sync me-1"></i>Refresh
+                </button>
+                <button class="btn btn-mc-sm btn-success" onclick="downloadRegionJournalsZip(${subsidiaryId})">
+                    <i class="fas fa-file-archive me-1"></i>Download ZIP
+                </button>
+            </div>
+        </div>
+        <table class="wb-journals-table">
+            <thead><tr>
+                <th>Journal</th>
+                <th class="text-center">Rows</th>
+                <th class="text-end">Total</th>
+                <th class="text-end">Download</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+
+    panel.dataset.memo = memo;
+}
+
+async function loadRegionJournals(subsidiaryId, tabKey, forceRefresh = false) {
+    const panel = document.getElementById(`wb-journals-${tabKey}`);
+    if (!panel) return;
+
+    if (!forceRefresh && regionJournalCache[subsidiaryId]) {
+        renderRegionJournalsPanel(panel, subsidiaryId, tabKey, regionJournalCache[subsidiaryId]);
+        return;
+    }
+
+    const body = panel.querySelector('.wb-journals-body');
+    if (body) {
+        body.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1"></i>Loading journals…';
+    }
+
+    try {
+        const statusRes = await fetch(`/api/journals/status/${jobId}/${subsidiaryId}`);
+        const status = await statusRes.json();
+        if (!status.success) throw new Error(status.error || 'Failed to load journal status');
+
+        if (!status.matching_ready) {
+            regionJournalCache[subsidiaryId] = { state: 'matching', status };
+            renderRegionJournalsPanel(panel, subsidiaryId, tabKey, regionJournalCache[subsidiaryId]);
+            return;
+        }
+
+        if (!status.journals_exist) {
+            regionJournalCache[subsidiaryId] = { state: 'not_synced', status };
+            renderRegionJournalsPanel(panel, subsidiaryId, tabKey, regionJournalCache[subsidiaryId]);
+            return;
+        }
+
+        const previewRes = await fetch(`/api/journals/preview/${jobId}/${subsidiaryId}`);
+        const preview = await previewRes.json();
+        if (!preview.success) {
+            regionJournalCache[subsidiaryId] = {
+                state: 'error',
+                error: preview.error || 'Failed to load journal preview',
+                status,
+            };
+            renderRegionJournalsPanel(panel, subsidiaryId, tabKey, regionJournalCache[subsidiaryId]);
+            return;
+        }
+
+        regionJournalCache[subsidiaryId] = { state: 'ready', status, preview };
+        renderRegionJournalsPanel(panel, subsidiaryId, tabKey, regionJournalCache[subsidiaryId]);
+    } catch (err) {
+        if (body) {
+            body.innerHTML = `<div class="alert alert-danger mb-0 py-2">${esc(err.message)}</div>`;
+        }
+    }
+}
+
+function refreshRegionJournals(subsidiaryId, tabKey) {
+    delete regionJournalCache[subsidiaryId];
+    loadRegionJournals(subsidiaryId, tabKey, true);
+}
+
+function getRegionJournalMemo(subsidiaryId) {
+    const cached = regionJournalCache[subsidiaryId];
+    if (cached?.status?.memo) return cached.status.memo;
+    const tabKey = (REGIONS.find(r => r.id === subsidiaryId) || {}).tabKey;
+    if (tabKey) {
+        const panel = document.getElementById(`wb-journals-${tabKey}`);
+        if (panel?.dataset.memo) return panel.dataset.memo;
+    }
+    return '';
+}
+
+async function downloadRegionJournal(subsidiaryId, journalName) {
+    const memo = getRegionJournalMemo(subsidiaryId);
+    try {
+        const response = await fetch(
+            `/api/journals/download-split/${jobId}/${subsidiaryId}/${encodeURIComponent(journalName)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ memo }),
+            }
+        );
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Download failed (${response.status})`);
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${journalName}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (err) {
+        alert('Error downloading journal: ' + err.message);
+    }
+}
+
+async function downloadRegionJournalsZip(subsidiaryId) {
+    const memo = getRegionJournalMemo(subsidiaryId);
+    const regionLabel = (REGIONS.find(r => r.id === subsidiaryId) || {}).label || subsidiaryId;
+    try {
+        const response = await fetch(`/api/journals/download-all/${jobId}/${subsidiaryId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ memo }),
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Download failed (${response.status})`);
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `All_Journals_${regionLabel}_Job${jobId}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (err) {
+        alert('Error downloading ZIP: ' + err.message);
+    }
+}
+
+// ── tab data + dashboard ───────────────────────────────────────────────────────
+async function loadWorkbookTab(tabKey, page) {
+    const tbody  = document.getElementById(`wb-tbody-${tabKey}`);
+    const pager  = document.getElementById(`wb-pager-${tabKey}`);
+    const banner = document.getElementById(`wb-banner-${tabKey}`);
+    const dash   = document.getElementById(`wb-dash-${tabKey}`);
+    if (!tbody) return;
+
+    buildTableHeaders(tabKey);
+    renderActiveFilterChips(tabKey);
+    updateFilterHeaderStates(tabKey);
+
+    const unusualOnly = !!wbUnusualFilter[tabKey];
+    const params = buildFilterParams(tabKey, true, page);
+
+    tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-muted py-4">
+        <i class="fas fa-circle-notch fa-spin me-2"></i>Loading…</td></tr>`;
+
+    const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/${tabKey}?${params}`);
+    const data = await res.json();
+    if (!data.success) {
+        tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-danger py-3">${esc(data.error||'Failed')}</td></tr>`;
+        return;
+    }
+    wbLoadedTabs.add(tabKey);
+
+    if (dash && data.stats && page === 1 && !data.is_filtered) renderTabDash(dash, data.stats, tabKey);
+
+    const unusualOnPage = data.unusual_matched_on_page || 0;
+    if (banner) {
+        const parts = [];
+        if (unusualOnly)       parts.push(`<strong>unusual only</strong>`);
+        if (data.is_filtered)  parts.push(`column/search filter active`);
+        if (unusualOnPage > 0) parts.push(`${unusualOnPage} unusual-matched on page`);
+        banner.innerHTML = parts.length
+            ? `<div class="wb-banner filter"><i class="fas fa-filter me-2"></i>${parts.join(' · ')} — ${data.total.toLocaleString()} row(s) shown.</div>`
+            : '';
+    }
+
+    if (!data.items.length) {
+        tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-muted py-4">No matching rows</td></tr>`;
+    } else {
+        tbody.innerHTML = data.items.map(row => {
+            const isUnusualMatched = row.highlight_unusual_match;
+            const isUnusualType    = unusualOnly && row.unusual_transtype;
+            const isUkBacs         = tabKey === 'uk_bacs' || row.in_uk_bacs_tab;
+            const isPartnerTransfer = tabKey === 'partner_transfer' || row.in_partner_transfer_tab;
+            const isSepaNetting     = tabKey === 'sepa_netting' || row.in_sepa_netting_tab;
+            let trCls = '';
+            if (isUnusualMatched)      trCls = 'row-unusual-matched';
+            else if (isUnusualType)  trCls = 'row-unusual';
+            else if (isUkBacs)       trCls = 'row-uk-bacs';
+            else if (isPartnerTransfer) trCls = 'row-partner-transfer';
+            else if (isSepaNetting)  trCls = 'row-sepa-netting';
+
+            const cells = WB_COLS.map(c => {
+                let v = row[c[0]];
+                if (c[0]==='billing_entity'||c[0]==='account') v=(v||'').toString().slice(0,50);
+                const tdCls = c[0]===WB_AMOUNT_COL ? ' class="amount-cell"' : c[0]===WB_DATE_COL ? ' class="date-cell"' : '';
+                if (c[0]==='transtype' && (isUnusualMatched||isUnusualType))
+                    return `<td><span class="flag unusual-type">⚠ ${esc(v??'')}</span></td>`;
+                const val = c[0]===WB_AMOUNT_COL ? fmtMoney(v) : esc(v??'');
+                return `<td${tdCls}>${val}</td>`;
+            }).join('');
+
+            let flagCell = '<td></td>';
+            if (isUnusualMatched)     flagCell = `<td><span class="flag unusual-match">Unusual match</span></td>`;
+            else if (isUnusualType)   flagCell = `<td><span class="flag unusual-type">Unusual type</span></td>`;
+            else if (isUkBacs)        flagCell = `<td><span class="flag uk-bacs">UK Bacs</span></td>`;
+            else if (isPartnerTransfer) flagCell = `<td><span class="flag partner-transfer">Partner Transfer</span></td>`;
+            else if (isSepaNetting)   flagCell = `<td><span class="flag sepa-netting">SEPA Netting</span></td>`;
+            return `<tr class="${trCls}">${cells}${flagCell}</tr>`;
+        }).join('');
+    }
+
+    if (pager) {
+        const note = (unusualOnly || data.is_filtered)
+            ? ` <span class="filter-active-badge ms-1">${data.total.toLocaleString()} matched</span>` : '';
+        pager.innerHTML = `
+            <span class="pg-info">${data.total.toLocaleString()} row(s)${note} &mdash; page ${data.page} of ${data.pages||1}</span>
+            <div class="pg-btns">
+                <button class="pg-btn" ${data.page<=1?'disabled':''} onclick="loadWorkbookTab('${tabKey}',${data.page-1})">
+                    <i class="fas fa-chevron-left me-1"></i>Prev
+                </button>
+                <button class="pg-btn" ${data.page>=data.pages?'disabled':''} onclick="loadWorkbookTab('${tabKey}',${data.page+1})">
+                    Next<i class="fas fa-chevron-right ms-1"></i>
+                </button>
+            </div>`;
+    }
+
+    const subsidiaryId = getSubsidiaryIdForTab(tabKey);
+    if (subsidiaryId && page === 1) {
+        loadRegionJournals(subsidiaryId, tabKey);
+    }
+}
+
+function renderTabDash(el, stats, tabKey) {
+    const rows = stats.total_rows || 0;
+    const amt  = stats.total_amount || 0;
+    const byTT = stats.by_transtype || [];
+    const byCU = stats.by_currency  || [];
+    const maxTT = byTT.length ? byTT[0].count : 1;
+
+    const ttBars = byTT.map(t => {
+        const pct = Math.round((t.count / maxTT) * 100);
+        const isUnusual = !['CARDSUCCESS','SEPASUCCESS','SEPAREJECT','WINSUCCESS','UKDDREJECT'].includes(t.transtype);
+        const fillColor = isUnusual ? '#ea580c' : t.transtype==='WINSUCCESS'||t.transtype==='UKDDREJECT' ? '#2563eb' : '#2563eb';
+        return `<div class="tt-row">
+            <span class="tt-name" title="${esc(t.transtype)}">${esc(t.transtype)}</span>
+            <div class="tt-track"><div class="tt-fill" style="width:${pct}%;background:${fillColor}"></div></div>
+            <span class="tt-num">${t.count.toLocaleString()}</span>
+        </div>`;
+    }).join('');
+
+    const curChips = byCU.map(c =>
+        `<span class="cur-chip">${esc(c.currency)} <strong>${c.count}</strong></span>`
+    ).join('');
+
+    el.innerHTML = `
+        <div class="tab-dash mb-3">
+            <div class="td-main">
+                <div class="tdm-val">${rows.toLocaleString()}</div>
+                <div class="tdm-label">rows</div>
+                <div class="tdm-amount">${fmtMoney(amt)}</div>
+            </div>
+            <div class="td-panel">
+                <div class="td-panel-title">Transtype breakdown</div>
+                <div class="tt-bar">${ttBars || '<span class="text-muted" style="font-size:.75rem">No data</span>'}</div>
+            </div>
+            <div class="td-panel">
+                <div class="td-panel-title">Currencies</div>
+                <div class="cur-chips">${curChips || '<span class="text-muted" style="font-size:.75rem">No data</span>'}</div>
+            </div>
+        </div>`;
+}
+
+// ── uk bacs / partner transfer / sepa netting ────────────────────────────────
+async function checkSepaNetting(btn) {
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1"></i>Checking…';
+    try {
+        const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/check-sepa-netting`, { method:'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Check failed');
+        const moved = data.rows_moved || 0;
+        const pairs = data.pairs_moved || 0;
+        const total = data.sepa_netting_total || 0;
+        const pairTotal = data.sepa_netting_pairs_total || Math.floor(total / 2);
+        let msg = moved
+            ? `Moved ${pairs} pair(s) (${moved} rows) to SEPA Netting tab (${pairTotal} pairs / ${total} rows total).`
+            : `No new pairs to move. SEPA Netting tab already has ${pairTotal} pair(s) (${total} rows).`;
+        if (data.unmatched_separeject) msg += `\n${data.unmatched_separeject} SEPAREJECT row(s) still unmatched.`;
+        if (data.removed_from_region_tab) msg += `\n${data.removed_from_region_tab} row(s) removed from a Stripe Import tab.`;
+        alert(msg);
+        wbLoadedTabs.clear();
+        await refreshWorkbookSummary();
+        await refreshStatus();
+    } catch(e) {
+        alert('SEPA netting check failed: ' + (e.message||e));
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function checkPartnerTransferTranstypes(btn) {
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1"></i>Checking…';
+    try {
+        const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/check-partner-transfer`, { method:'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Check failed');
+        const moved = data.rows_moved || 0;
+        const total = data.partner_transfer_total || 0;
+        let msg = moved
+            ? `Moved ${moved} row(s) to Partner Transfer tab (${total} total).`
+            : `No new rows to move. Partner Transfer tab already has ${total} row(s).`;
+        if (data.removed_from_region_tab) msg += `\n${data.removed_from_region_tab} row(s) removed from a Stripe Import tab.`;
+        alert(msg);
+        wbLoadedTabs.clear();
+        await refreshWorkbookSummary();
+        await refreshStatus();
+    } catch(e) {
+        alert('Partner Transfer check failed: ' + (e.message||e));
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function checkUkBacsTranstypes(btn) {
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1"></i>Checking…';
+    try {
+        const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/check-uk-bacs`, { method:'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Check failed');
+        const moved = data.rows_moved || 0;
+        const total = data.uk_bacs_total || 0;
+        const wins  = (data.by_transtype||{}).WINSUCCESS || 0;
+        const rej   = (data.by_transtype||{}).UKDDREJECT  || 0;
+        let msg = moved
+            ? `Moved ${moved} row(s) to UK Bacs tab (${total} total).\nWINSUCCESS: ${wins}  |  UKDDREJECT: ${rej}`
+            : `No new rows to move. UK Bacs tab already has ${total} row(s).`;
+        if (data.removed_from_region_tab) msg += `\n${data.removed_from_region_tab} row(s) removed from a Stripe Import tab.`;
+        alert(msg);
+        wbLoadedTabs.clear();
+        await refreshWorkbookSummary();
+        await refreshStatus();
+    } catch(e) {
+        alert('UK Bacs check failed: ' + (e.message||e));
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+// ── load / reassign ───────────────────────────────────────────────────────────
+async function loadCashbook() {
+    const input = document.getElementById('cashbook-file');
+    const msg   = document.getElementById('load-msg');
+    if (!input.files.length) {
+        msg.innerHTML = '<div class="alert alert-warning py-2 small">Select a file first.</div>';
+        return;
+    }
+    const btn = document.getElementById('btn-load');
+    btn.disabled = true;
+    msg.innerHTML = '<div class="alert alert-info py-2 small"><i class="fas fa-circle-notch fa-spin me-2"></i>Loading…</div>';
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    try {
+        const res  = await fetch(`/api/master-cashbook/${jobId}/upload`, { method:'POST', body:fd });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Upload failed');
+        let extra = '';
+        if (data.load.data_error_rows) {
+            extra = ` DATA ERROR: ${data.load.data_error_resolved||0} assigned, ${data.load.data_error_unresolved||0} unresolved.`;
+        }
+        msg.innerHTML = `<div class="alert alert-success py-2 small">Loaded ${data.load.rows_added} rows`
+            + (data.load.skipped_no_client ? ` (${data.load.skipped_no_client} skipped — no client_id)` : '')
+            + `.${extra}</div>`;
+        if (data.status) renderStatus(data.status);
+        else await refreshStatus();
+    } catch(e) {
+        msg.innerHTML = `<div class="alert alert-danger py-2 small">${esc(e.message)}</div>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function reassign() {
+    const msg = document.getElementById('load-msg');
+    msg.innerHTML = '<div class="alert alert-info py-2 small"><i class="fas fa-circle-notch fa-spin me-2"></i>Re-assigning…</div>';
+    try {
+        const res  = await fetch(`/api/master-cashbook/${jobId}/assign`, { method:'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Re-assign failed');
+        msg.innerHTML = `<div class="alert alert-success py-2 small">Updated ${data.result.rows_updated} rows.</div>`;
+        if (data.status) renderStatus(data.status);
+    } catch(e) {
+        msg.innerHTML = `<div class="alert alert-danger py-2 small">${esc(e.message)}</div>`;
+    }
+}
+
+// ── feed ──────────────────────────────────────────────────────────────────────
+async function feedRegion(sid, label) {
+    const existing = await fetch(`/api/master-cashbook/${jobId}/status`).then(r=>r.json());
+    const fs = existing.feed_status && existing.feed_status[label];
+    const n  = fs ? fs.cashbook_transaction_rows : 0;
+    if (!confirm(`Feed ${label}? This replaces ${n} existing cashbook row(s) in reconciliation for this job.`)) return;
+    const res  = await fetch(`/api/master-cashbook/${jobId}/feed/${sid}`, { method:'POST' });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || 'Feed failed'); return; }
+    alert(`Fed ${data.result.rows_fed} rows to ${label}.`);
+    if (data.status) renderStatus(data.status);
+}
+
+async function feedAll() {
+    if (!confirm('Feed ALL five regions? This replaces existing per-subsidiary cashbook data for this job.')) return;
+    const res  = await fetch(`/api/master-cashbook/${jobId}/feed-all`, { method:'POST' });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || 'Feed failed'); return; }
+    const total = (data.results||[]).reduce((s,r) => s+(r.rows_fed||0), 0);
+    alert(`Fed ${total} rows across all regions.`);
+    if (data.status) renderStatus(data.status);
+}
+
+// ── review queue ──────────────────────────────────────────────────────────────
+async function loadPreview() {
+    const res  = await fetch(`/api/master-cashbook/${jobId}/preview`);
+    const data = await res.json();
+    const card = document.getElementById('issues-card');
+    const tbody = document.getElementById('issues-tbody');
+    if (!data.success || !data.items || !data.items.length) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+    tbody.innerHTML = data.items.map(it => `<tr class="${it.is_data_error ? 'row-unusual' : ''}">
+        <td>${esc(it.client_id)}</td>
+        <td class="small">${it.is_data_error ? '<span class="flag unusual-type me-1">DATA ERR</span>' : ''}${esc((it.billing_entity||'').slice(0,30))}${it.billing_entity_corrected ? '<br><span class="text-success small">→ '+esc(it.billing_entity_corrected.slice(0,30))+'</span>' : ''}</td>
+        <td class="small">${esc(it.location||'')}</td>
+        <td class="small">${esc(it.account)}</td>
+        <td>${esc(it.assigned_region)}</td>
+        <td>${esc(it.assignment_source)}</td>
+        <td class="small text-muted">${esc(it.assignment_detail||'')}</td>
+    </tr>`).join('');
+}
+
+// ── status refresh ────────────────────────────────────────────────────────────
+async function refreshStatus() {
+    const res  = await fetch(`/api/master-cashbook/${jobId}/status`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Status failed');
+    renderStatus(data);
+}
+
+// ── fullscreen ────────────────────────────────────────────────────────────────
+let wbFsActiveKey = null;
+
+function openFullscreen() {
+    if (!wbSummaryData) return;
+    const overlay = document.getElementById('wb-fs-overlay');
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    document.getElementById('wb-fs-job-name').textContent =
+        document.getElementById('job-name').textContent;
+
+    // clone legend
+    const legendSrc = document.querySelector('.wb-tabs-wrapper .wb-legend');
+    const legendDst = document.getElementById('wb-fs-legend');
+    if (legendSrc) legendDst.innerHTML = legendSrc.innerHTML;
+
+    wbFsActiveKey = wbActiveKey;
+    buildFsTabs(wbSummaryData);
+
+    // Esc key closes
+    document.addEventListener('keydown', fsKeyHandler);
+}
+
+function closeFullscreen() {
+    const overlay = document.getElementById('wb-fs-overlay');
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', fsKeyHandler);
+}
+
+function fsKeyHandler(e) { if (e.key === 'Escape') closeFullscreen(); }
+
+function buildFsTabs(summary) {
+    const barEl     = document.getElementById('wb-fs-tab-bar');
+    const contentEl = document.getElementById('wb-fs-tab-content');
+    barEl.innerHTML     = '';
+    contentEl.innerHTML = '';
+
+    summary.tabs.forEach((tab, idx) => {
+        const isActive = tab.key === (wbFsActiveKey || summary.tabs[0].key);
+        if (isActive) wbFsActiveKey = tab.key;
+
+        const unusualBadge = (tab.unusual_matched_count || 0) > 0
+            ? `<span class="tb-unusual">${tab.unusual_matched_count} !</span>` : '';
+        const bacsBadge = tab.key === 'uk_bacs'
+            ? `<span class="tb-bacs">BACS</span>` : '';
+        const partnerBadge = tab.key === 'partner_transfer'
+            ? `<span class="tb-bacs" style="background:#f5f3ff;color:#7c3aed">PT</span>` : '';
+        const sepaBadge = tab.key === 'sepa_netting'
+            ? `<span class="tb-bacs" style="background:#ecfdf5;color:#059669">SEPA</span>` : '';
+
+        barEl.innerHTML += `
+            <button class="wb-tab-btn${isActive ? ' active' : ''}"
+                    data-fs-tab-key="${tab.key}" onclick="switchFsTab('${tab.key}')">
+                ${esc(tab.label)}
+                <span class="tb-count">${tab.count}</span>
+                ${unusualBadge}${bacsBadge}${partnerBadge}${sepaBadge}
+            </button>`;
+
+        // reuse inline tab content — build a minimal pane with table + pager only
+        contentEl.innerHTML += `
+            <div class="wb-pane${isActive ? ' active' : ''}" id="wb-fs-pane-${tab.key}"
+                 data-tab-key="${tab.key}" style="padding:0">
+                <div id="wb-fs-banner-${tab.key}"></div>
+                <div class="wb-table-wrap" style="border-radius:0;border-left:none;border-right:none;border-top:none;flex:1;max-height:none">
+                    <table class="wb-table" id="wb-fs-table-${tab.key}">
+                        <thead><tr>
+                            ${WB_COLS.map(c=>`<th>${c[1]}</th>`).join('')}<th>Flag</th>
+                        </tr></thead>
+                        <tbody id="wb-fs-tbody-${tab.key}">
+                            <tr><td colspan="${WB_COLS.length+1}" class="text-center text-muted py-4">
+                                <i class="fas fa-circle-notch fa-spin me-2"></i>Loading…
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="wb-pager" id="wb-fs-pager-${tab.key}" style="padding:8px 16px;border-top:1px solid var(--border);flex-shrink:0"></div>
+            </div>`;
+    });
+
+    if (wbFsActiveKey) loadFsTab(wbFsActiveKey, 1);
+}
+
+function switchFsTab(key) {
+    wbFsActiveKey = key;
+    document.querySelectorAll('#wb-fs-tab-bar .wb-tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.fstabKey === key));
+    document.querySelectorAll('#wb-fs-tab-content .wb-pane').forEach(p =>
+        p.classList.toggle('active', p.dataset.tabKey === key));
+    loadFsTab(key, 1);
+}
+
+async function loadFsTab(tabKey, page) {
+    const tbody  = document.getElementById(`wb-fs-tbody-${tabKey}`);
+    const pager  = document.getElementById(`wb-fs-pager-${tabKey}`);
+    const banner = document.getElementById(`wb-fs-banner-${tabKey}`);
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-muted py-4">
+        <i class="fas fa-circle-notch fa-spin me-2"></i>Loading…</td></tr>`;
+
+    const unusualOnly = !!wbUnusualFilter[tabKey];
+    const qs = unusualOnly ? '&unusual_only=1' : '';
+    const res  = await fetch(`/api/master-cashbook/${jobId}/workbook/${tabKey}?page=${page}&per_page=100${qs}`);
+    const data = await res.json();
+    if (!data.success) {
+        tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-danger py-3">${esc(data.error||'Failed')}</td></tr>`;
+        return;
+    }
+
+    const unusualOnPage = data.unusual_matched_on_page || 0;
+    if (banner) {
+        if (unusualOnly) {
+            banner.innerHTML = `<div class="wb-banner filter" style="margin:8px 16px"><i class="fas fa-filter me-2"></i>Showing <strong>unusual only</strong> — ${data.total} row(s).</div>`;
+        } else if (unusualOnPage > 0) {
+            banner.innerHTML = `<div class="wb-banner unusual" style="margin:8px 16px"><i class="fas fa-exclamation-circle me-2"></i>${unusualOnPage} unusual row(s) on this page.</div>`;
+        } else {
+            banner.innerHTML = '';
+        }
+    }
+
+    if (!data.items.length) {
+        tbody.innerHTML = `<tr><td colspan="${WB_COLS.length+1}" class="text-center text-muted py-4">No rows</td></tr>`;
+    } else {
+        tbody.innerHTML = data.items.map(row => {
+            const isUnusualMatched = row.highlight_unusual_match;
+            const isUnusualType    = unusualOnly && row.unusual_transtype;
+            const isUkBacs         = tabKey === 'uk_bacs' || row.in_uk_bacs_tab;
+            const isPartnerTransfer = tabKey === 'partner_transfer' || row.in_partner_transfer_tab;
+            const isSepaNetting     = tabKey === 'sepa_netting' || row.in_sepa_netting_tab;
+            let trCls = '';
+            if (isUnusualMatched)      trCls = 'row-unusual-matched';
+            else if (isUnusualType)  trCls = 'row-unusual';
+            else if (isUkBacs)       trCls = 'row-uk-bacs';
+            else if (isPartnerTransfer) trCls = 'row-partner-transfer';
+            else if (isSepaNetting)  trCls = 'row-sepa-netting';
+
+            const cells = WB_COLS.map(c => {
+                let v = row[c[0]];
+                if (c[0]==='billing_entity'||c[0]==='account') v=(v||'').toString().slice(0,40);
+                const tdCls = c[0]===WB_AMOUNT_COL ? ' class="amount-cell"' : c[0]===WB_DATE_COL ? ' class="date-cell"' : '';
+                const val   = c[0]===WB_AMOUNT_COL ? fmtMoney(v) : esc(v??'');
+                if (c[0]==='transtype' && (isUnusualMatched||isUnusualType))
+                    return `<td><span class="flag unusual-type">⚠ ${esc(v??'')}</span></td>`;
+                return `<td${tdCls}>${val}</td>`;
+            }).join('');
+
+            let flagCell = '<td></td>';
+            if (isUnusualMatched)     flagCell = `<td><span class="flag unusual-match">Unusual match</span></td>`;
+            else if (isUnusualType)   flagCell = `<td><span class="flag unusual-type">Unusual type</span></td>`;
+            else if (isUkBacs)        flagCell = `<td><span class="flag uk-bacs">UK Bacs</span></td>`;
+            else if (isPartnerTransfer) flagCell = `<td><span class="flag partner-transfer">Partner Transfer</span></td>`;
+            else if (isSepaNetting)   flagCell = `<td><span class="flag sepa-netting">SEPA Netting</span></td>`;
+            return `<tr class="${trCls}">${cells}${flagCell}</tr>`;
+        }).join('');
+    }
+
+    if (pager) {
+        pager.innerHTML = `
+            <span class="pg-info">${data.total.toLocaleString()} rows &mdash; page ${data.page} of ${data.pages||1}</span>
+            <div class="pg-btns">
+                <button class="pg-btn" ${data.page<=1?'disabled':''} onclick="loadFsTab('${tabKey}',${data.page-1})">
+                    <i class="fas fa-chevron-left me-1"></i>Prev
+                </button>
+                <button class="pg-btn" ${data.page>=data.pages?'disabled':''} onclick="loadFsTab('${tabKey}',${data.page+1})">
+                    Next<i class="fas fa-chevron-right ms-1"></i>
+                </button>
+            </div>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    refreshStatus().catch(e => console.warn(e));
+});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -13,7 +13,9 @@
         <!-- Header -->
         <div class="row">
             <div class="col-12">
-{% set nav_active = 'receipts' %}
+{% set nav_active = 'journal_prep' %}
+{% set nav_master_cashbook_job_id = job_id %}
+{% set nav_subsidiary_id = subsidiary_id %}
 {% set nav_extra_links = [] %}
 {% include 'partials/navbar.html' %}
 
@@ -52,6 +54,26 @@
                                     <h6><strong>Last Updated:</strong> <span id="last-updated">Loading...</span></h6>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Unmatched Stripe Download -->
+            <div class="row mb-4" id="unmatched-stripe-section">
+                <div class="col-12">
+                    <div class="card border-warning">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0"><i class="fas fa-credit-card"></i> Unmatched Stripe</h5>
+                        </div>
+                        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+                            <div>
+                                <p class="mb-0 text-muted">Charge and refund rows from Stripe that did not match during reconciliation.</p>
+                                <p class="mb-0 mt-1" id="unmatched-stripe-count"><small class="text-muted">Loading...</small></p>
+                            </div>
+                            <button class="btn btn-warning" id="unmatched-stripe-download-btn" onclick="downloadUnmatchedStripe()">
+                                <i class="fas fa-download"></i> Download Unmatched Stripe
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -361,8 +383,8 @@
                                             <td class="text-end"><strong id="summary-total-fees-amount">$0.00</strong></td>
                                         </tr>
                                         
-                                        <!-- Payment Failure Refunds -->
-                                        <tr>
+                                        <!-- Payment Failure Refunds (EU only) -->
+                                        <tr id="summary-pfr-row"{% if subsidiary_id != 4 %} style="display: none;"{% endif %}>
                                             <td class="ps-4">Payment Failure Refunds</td>
                                             <td class="text-center" id="summary-pfr-count">-</td>
                                             <td class="text-end" id="summary-pfr-amount">$0.00</td>
@@ -487,6 +509,11 @@
                                     <button class="btn btn-secondary btn-lg w-100 mt-2" onclick="syncJournals()" id="sync-btn" style="display: none;">
                                         <i class="fas fa-sync"></i> Sync Journals
                                     </button>
+                                    {% set _wb_labels = {1:'AU',2:'CA',3:'US',4:'EU',5:'UK'} %}
+                                    <div id="workbook-actions-wrap" style="display:none;">
+                                        {% set wb_job_id = job_id %}{% set wb_subsidiary_id = subsidiary_id %}{% set wb_region_label = _wb_labels.get(subsidiary_id, 'Region') %}{% set wb_layout = 'stack' %}
+                                        {% include 'partials/workbook_actions.html' %}
+                                    </div>
                                 </div>
                             </div>
                             
@@ -741,6 +768,7 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/workbook_actions.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const jobId = {{ job_id }};
@@ -749,8 +777,38 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadReconciliationSummary();
             updateLastUpdated();
-            checkJournalStatus(); // Check if journals already exist
+            checkJournalStatus();
+            loadUnmatchedStripeStatus();
         });
+
+        function downloadUnmatchedStripe() {
+            window.location.href = `/api/download-unmatched-stripe/${jobId}/${subsidiaryId}`;
+        }
+
+        function loadUnmatchedStripeStatus() {
+            fetch(`/api/journal-prep-ready/${jobId}/${subsidiaryId}`)
+                .then(response => response.json())
+                .then(data => {
+                    const countEl = document.getElementById('unmatched-stripe-count');
+                    const btn = document.getElementById('unmatched-stripe-download-btn');
+                    if (!data.success) {
+                        if (countEl) countEl.textContent = 'Unable to load unmatched count';
+                        return;
+                    }
+                    const n = data.unmatched_stripe_count || 0;
+                    if (countEl) {
+                        countEl.textContent = n === 0
+                            ? 'No unmatched charge/refund transactions'
+                            : `${n} unmatched charge/refund transaction${n === 1 ? '' : 's'}`;
+                    }
+                    if (btn) btn.disabled = n === 0;
+                })
+                .catch(err => {
+                    console.warn('Unmatched stripe status:', err);
+                    const countEl = document.getElementById('unmatched-stripe-count');
+                    if (countEl) countEl.textContent = 'Unable to load unmatched count';
+                });
+        }
 
         function loadReconciliationSummary() {
             console.log('[DEBUG] Starting loadReconciliationSummary for job', jobId, 'subsidiary', subsidiaryId);
@@ -765,11 +823,11 @@
                         return;
                     }
                     // Update master file count
-                    const totalMatches = data.summary.total_matched;
+                    const totalMatches = data.summary?.total_matched ?? 0;
                     document.getElementById('master-file-count').textContent = `${totalMatches} matched transactions`;
                     
                     // Update refunds count
-                    const refundsCount = data.metadata.process3.refunds_count || 0;
+                    const refundsCount = data.metadata?.process3?.refunds_count || 0;
                     document.getElementById('refunds-count').textContent = `${refundsCount} refund transactions`;
                     
                     // Load split summary for individual downloads
@@ -888,7 +946,9 @@
             console.log('[Complete Reconciliation Summary] Request: GET', summaryUrl, '| jobId=', jobId, 'subsidiaryId=', subsidiaryId);
             const [summaryResp, pfrStateResp] = await Promise.all([
                 fetch(summaryUrl),
-                fetch(`/api/stripe-automation/state/${jobId}`)
+                subsidiaryId === 4
+                    ? fetch(`/api/stripe-automation/state/${jobId}/${subsidiaryId}`)
+                    : Promise.resolve({ json: async () => ({ success: true, pfr_coli_fees_total: 0 }) })
             ]);
             const data = await summaryResp.json();
             if (!summaryResp.ok || data.error) {
@@ -902,7 +962,9 @@
             console.log('[Complete Reconciliation Summary] Response splits.refunds:', data.splits && data.splits.refunds ? data.splits.refunds : 'N/A', '| Refunds total (raw):', refundsTotal);
             let pfrState = { success: false, pfr_coli_fees_total: 0 };
             try { pfrState = await pfrStateResp.json(); } catch (e) { pfrState = { success: false, pfr_coli_fees_total: 0 }; }
-            const pfrExtraFees = Number(pfrState && pfrState.success ? (pfrState.pfr_coli_fees_total || 0) : 0);
+            const pfrExtraFees = subsidiaryId === 4
+                ? Number(pfrState && pfrState.success ? (pfrState.pfr_coli_fees_total || 0) : 0)
+                : 0;
                     // Format currency
                     const fmt = (num) => {
                         return new Intl.NumberFormat('en-US', {
@@ -1241,8 +1303,8 @@
                     tr.innerHTML = `<td>${k}</td><td class="text-center">${info.count}</td><td class="text-end">$${(info.total||0).toFixed(2)}</td>`;
                     tbody.appendChild(tr);
                 });
-                const total = (d.journals.Main.total||0)+(d.journals.POA.total||0)+(d.journals.Cross_Subsidiary.total||0);
-                document.getElementById('fp-summary').textContent = `Total rows: ${(d.journals.Main.count||0)+(d.journals.POA.count||0)+(d.journals.Cross_Subsidiary.count||0)} | Total: $${total.toFixed(2)}`;
+                const total = (d.journals?.Main?.total||0)+(d.journals?.POA?.total||0)+(d.journals?.Cross_Subsidiary?.total||0);
+                document.getElementById('fp-summary').textContent = `Total rows: ${(d.journals?.Main?.count||0)+(d.journals?.POA?.count||0)+(d.journals?.Cross_Subsidiary?.count||0)} | Total: $${total.toFixed(2)}`;
                 updateFPViewLink();
               });
         }
@@ -1564,6 +1626,8 @@
                             document.getElementById('generate-btn').style.display = 'none';
                             document.getElementById('clear-btn').style.display = 'block';
                             document.getElementById('sync-btn').style.display = 'none';
+                            const wbWrap = document.getElementById('workbook-actions-wrap');
+                            if (wbWrap) wbWrap.style.display = 'block';
                             document.getElementById('journal-status').style.display = 'block';
                             document.getElementById('status-message').textContent = 
                                 `Journals have been generated (${data.total_journals} transactions). Use "Clear Journals & Generate New" to regenerate.`;
@@ -1573,6 +1637,8 @@
                             document.getElementById('generate-btn').style.display = 'none';
                             document.getElementById('clear-btn').style.display = 'none';
                             document.getElementById('sync-btn').style.display = 'block';
+                            const wbWrap = document.getElementById('workbook-actions-wrap');
+                            if (wbWrap) wbWrap.style.display = 'block';
                             document.getElementById('journal-status').style.display = 'block';
                             document.getElementById('status-message').textContent = 'No journals generated yet. You can generate journals now.';
                         }
@@ -1737,6 +1803,10 @@
 
 
         function displayJournalResults(data) {
+            if (!data?.summary?.journals) {
+                console.error('Invalid journal preview data', data);
+                return;
+            }
             // Show results section
             document.getElementById('journal-generation-results').style.display = 'block';
             
@@ -1746,6 +1816,8 @@
             
             const journals = data.summary.journals;
             const reconciliation = data.summary.reconciliation || {};
+            const breakdown = reconciliation.breakdown || {};
+            const masterUploadTotalEur = -(breakdown.refunds || 0) + (breakdown.poa || 0) + (breakdown.main || 0) + (breakdown.cross_subsidiary || 0);
             
             let totalTransactions = 0;
             let totalAmountAED = 0;
@@ -1849,7 +1921,7 @@
                                 <small class="text-muted">Master Upload File & Split Journals</small>
                                 <div class="d-flex justify-content-between">
                                     <span>Total (EUR):</span>
-                                    <strong>€${(-reconciliation.breakdown?.refunds + reconciliation.breakdown?.poa + reconciliation.breakdown?.main + reconciliation.breakdown?.cross_subsidiary).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</strong>
+                                    <strong>€${masterUploadTotalEur.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</strong>
                                 </div>
                             </div>
                         </div>
@@ -1866,11 +1938,11 @@
                         </div>
                     </div>
                 </div>
-                <div class="alert ${Math.abs(totalAmountEUR - (-reconciliation.breakdown?.refunds + reconciliation.breakdown?.poa + reconciliation.breakdown?.main + reconciliation.breakdown?.cross_subsidiary)) < 1 ? 'alert-success' : 'alert-danger'} mb-0 py-2">
+                <div class="alert ${Math.abs(totalAmountEUR - masterUploadTotalEur) < 1 ? 'alert-success' : 'alert-danger'} mb-0 py-2">
                     <div class="d-flex justify-content-between align-items-center">
                         <span><strong>Difference:</strong></span>
-                        <span><strong>€${Math.abs(totalAmountEUR - (-reconciliation.breakdown?.refunds + reconciliation.breakdown?.poa + reconciliation.breakdown?.main + reconciliation.breakdown?.cross_subsidiary)).toFixed(2)}</strong></span>
-                        <span>${Math.abs(totalAmountEUR - (-reconciliation.breakdown?.refunds + reconciliation.breakdown?.poa + reconciliation.breakdown?.main + reconciliation.breakdown?.cross_subsidiary)) < 1 ? '✅ Match!' : '❌ Mismatch'}</span>
+                        <span><strong>€${Math.abs(totalAmountEUR - masterUploadTotalEur).toFixed(2)}</strong></span>
+                        <span>${Math.abs(totalAmountEUR - masterUploadTotalEur) < 1 ? '✅ Match!' : '❌ Mismatch'}</span>
                     </div>
                 </div>
                 <div class="mt-3">

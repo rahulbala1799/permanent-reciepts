@@ -1,0 +1,43 @@
+{# Workbook actions: Update / Clear / Rerun
+   Set: wb_job_id, wb_subsidiary_id, wb_region_label, wb_layout ('stack'|'inline'|'compact')
+#}
+{% set _layout = wb_layout|default('stack') %}
+<div class="workbook-actions workbook-actions-{{ _layout }} mb-2" data-wb-job="{{ wb_job_id }}" data-wb-sid="{{ wb_subsidiary_id }}">
+    {% if _layout == 'stack' %}
+    <button type="button" class="btn btn-info btn-lg w-100 mt-2 wb-btn-update" onclick="workbookUpdate({{ wb_job_id }}, {{ wb_subsidiary_id }}, this)">
+        <i class="fas fa-book"></i> Update Cashbook
+    </button>
+    <div class="btn-group w-100 mt-2" role="group">
+        <button type="button" class="btn btn-outline-warning wb-btn-clear" onclick="workbookClear({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-eraser"></i> Clear tab
+        </button>
+        <button type="button" class="btn btn-outline-danger wb-btn-rerun" onclick="workbookRerun({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-redo"></i> Rerun region
+        </button>
+    </div>
+    {% elif _layout == 'inline' %}
+    <div class="btn-group btn-group-sm flex-wrap" role="group">
+        <button type="button" class="btn btn-info wb-btn-update" onclick="workbookUpdate({{ wb_job_id }}, {{ wb_subsidiary_id }}, this)">
+            <i class="fas fa-book"></i> Update Cashbook
+        </button>
+        <button type="button" class="btn btn-outline-warning wb-btn-clear" onclick="workbookClear({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-eraser"></i> Clear tab
+        </button>
+        <button type="button" class="btn btn-outline-danger wb-btn-rerun" onclick="workbookRerun({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-redo"></i> Rerun
+        </button>
+    </div>
+    {% else %}
+    <div class="d-flex flex-wrap gap-1">
+        <button type="button" class="btn btn-info btn-sm wb-btn-update" title="Update Cashbook" onclick="workbookUpdate({{ wb_job_id }}, {{ wb_subsidiary_id }}, this)">
+            <i class="fas fa-book"></i><span class="d-none d-md-inline ms-1">Update</span>
+        </button>
+        <button type="button" class="btn btn-outline-warning btn-sm wb-btn-clear" title="Clear tab" onclick="workbookClear({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-eraser"></i><span class="d-none d-md-inline ms-1">Clear</span>
+        </button>
+        <button type="button" class="btn btn-outline-danger btn-sm wb-btn-rerun" title="Rerun region" onclick="workbookRerun({{ wb_job_id }}, {{ wb_subsidiary_id }}, '{{ wb_region_label }}', this)">
+            <i class="fas fa-redo"></i><span class="d-none d-md-inline ms-1">Rerun</span>
+        </button>
+    </div>
+    {% endif %}
+</div>

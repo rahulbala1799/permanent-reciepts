@@ -7,9 +7,7 @@ HARD RULE: ONE-WAY SYNC ONLY
 - Journal data changes → Original data NEVER affected
 """
 
-from datetime import datetime
-from typing import List, Optional
-import logging
+from journal_generation.journal_builder import resolve_payment_number
 
 logger = logging.getLogger(__name__)
 
@@ -214,19 +212,9 @@ class JournalSync:
         return "Main"
     
     def _generate_payment_number(self, match) -> str:
-        """Generate payment number: CPMT: {invoice_number}-{date}"""
-        if not match.cb_invoice_number:
-            return None
-        
-        # Use payment date if available, otherwise use created date
-        date_str = match.cb_payment_date or match.stripe_created
-        if date_str:
-            # Extract just the date part if it's a datetime
-            if ' ' in str(date_str):
-                date_str = str(date_str).split(' ')[0]
-            return f"CPMT: {match.cb_invoice_number}-{date_str}"
-        
-        return f"CPMT: {match.cb_invoice_number}"
+        """Use cashbook/master payment #; append reasoncode when not already present."""
+        result = resolve_payment_number(match)
+        return result or None
     
     def get_journal_transactions(self, job_id: int, subsidiary_id: int, journal_type: str = None) -> List:
         """

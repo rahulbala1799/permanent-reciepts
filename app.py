@@ -63,6 +63,7 @@ from models import create_models
     PartnerTransferOut,
     ClientRegionHistory,
     ClientRegionProfile,
+    MasterCashbookTransaction,
 ) = create_models(db)
 
 # Register Journals Processing Blueprint
@@ -118,11 +119,36 @@ globals()['ManualPaymentProcessedBank'] = ManualPaymentProcessedBank
 globals()['ManualPaymentState'] = ManualPaymentState
 globals()['ClientRegionHistory'] = ClientRegionHistory
 globals()['ClientRegionProfile'] = ClientRegionProfile
+globals()['MasterCashbookTransaction'] = MasterCashbookTransaction
 
 from client_region_service import (
     SUBSIDIARY_LABELS,
     rebuild_client_regions,
     profile_to_api_dict,
+)
+from cashbook_split_service import (
+    load_master_from_dataframe,
+    reassign_master_job,
+    master_status,
+    preview_issues,
+    master_rows_for_export,
+    master_to_export_dataframe,
+    feed_subsidiary,
+    feed_all_subsidiaries,
+    normalize_cashbook_columns,
+    sync_workbook_from_region,
+    sync_workbook_all_regions,
+    clear_workbook_region,
+    rerun_workbook_region,
+    check_uk_bacs_transtypes,
+    check_partner_transfer_transtypes,
+    check_sepa_netting,
+    workbook_summary,
+    master_rows_for_workbook_tab,
+    master_row_workbook_dict,
+    workbook_tab_stats,
+    workbook_column_distinct_values,
+    export_workbook_excel,
 )
 
 # Ensure all tables exist (including newly added state tables)
@@ -292,6 +318,389 @@ def client_regions_rebuild():
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================== MASTER CASHBOOK ====================
+
+@app.route('/prepare/master-cashbook/<int:job_id>')
+def master_cashbook_page(job_id):
+    """Upload full monthly cashbook, split by region, feed subsidiaries."""
+    return render_template('master_cashbook.html', job_id=job_id)
+
+
+@app.route('/api/master-cashbook/<int:job_id>/status')
+def master_cashbook_status(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        data = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/preview')
+def master_cashbook_preview(job_id):
+    try:
+        items = preview_issues(MasterCashbookTransaction, job_id)
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/upload', methods=['POST'])
+def master_cashbook_upload(job_id):
+    import pandas as pd
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file provided'}), 400
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+        if not allowed_file(file.filename):
+            return jsonify({'success': False, 'error': 'Invalid file type'}), 400
+
+        if file.filename.lower().endswith('.csv'):
+            df = pd.read_csv(file, encoding='cp1252')
+        else:
+            df = pd.read_excel(file)
+
+        result = load_master_from_dataframe(
+            db, MasterCashbookTransaction, ClientRegionProfile, job_id, df, file.filename
+        )
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'load': result, 'status': status})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/assign', methods=['POST'])
+def master_cashbook_reassign(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        result = reassign_master_job(db, MasterCashbookTransaction, ClientRegionProfile, job_id)
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/download/<int:subsidiary_id>')
+def master_cashbook_download_region(job_id, subsidiary_id):
+    import pandas as pd
+    from io import BytesIO
+    from flask import Response
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'error': 'Invalid subsidiary'}), 400
+        rows = master_rows_for_export(MasterCashbookTransaction, job_id, subsidiary_id)
+        if not rows:
+            return jsonify({'error': 'No rows for this region'}), 404
+        df = master_to_export_dataframe(rows)
+        label = SUBSIDIARY_LABELS[subsidiary_id]
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=f'Cashbook {label}', index=False)
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename=master_cashbook_{label}_job_{job_id}.xlsx'
+            },
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/download-all')
+def master_cashbook_download_all(job_id):
+    import pandas as pd
+    import zipfile
+    from io import BytesIO
+    from flask import Response
+    try:
+        buf = BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for sid, label in SUBSIDIARY_LABELS.items():
+                rows = master_rows_for_export(MasterCashbookTransaction, job_id, sid)
+                if not rows:
+                    continue
+                df = master_to_export_dataframe(rows)
+                xbuf = BytesIO()
+                with pd.ExcelWriter(xbuf, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name=f'Cashbook {label}', index=False)
+                zf.writestr(f'cashbook_{label}_job_{job_id}.xlsx', xbuf.getvalue())
+        buf.seek(0)
+        return Response(
+            buf.getvalue(),
+            mimetype='application/zip',
+            headers={'Content-Disposition': f'attachment; filename=master_cashbook_split_job_{job_id}.zip'},
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/feed/<int:subsidiary_id>', methods=['POST'])
+def master_cashbook_feed_region(job_id, subsidiary_id):
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+        existing = CashbookTransaction.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).count()
+        result = feed_subsidiary(db, MasterCashbookTransaction, CashbookTransaction, job_id, subsidiary_id)
+        result['replaced_existing_rows'] = existing
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/feed-all', methods=['POST'])
+def master_cashbook_feed_all(job_id):
+    try:
+        results = feed_all_subsidiaries(db, MasterCashbookTransaction, CashbookTransaction, job_id)
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'results': results, 'status': status})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/update-from-stripe/<int:subsidiary_id>', methods=['POST'])
+def master_cashbook_update_from_stripe(job_id, subsidiary_id):
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+        ProcessingJob.query.get_or_404(job_id)
+        result = sync_workbook_from_region(
+            db, job_id, subsidiary_id,
+            MatchedTransaction, CashbookTransaction, MasterCashbookTransaction,
+        )
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/update-from-stripe/all', methods=['POST'])
+def master_cashbook_update_all_from_stripe(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        result = sync_workbook_all_regions(
+            db, job_id,
+            MatchedTransaction, CashbookTransaction, MasterCashbookTransaction,
+        )
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook-clear/<int:subsidiary_id>', methods=['DELETE'])
+def master_cashbook_workbook_clear(job_id, subsidiary_id):
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+        ProcessingJob.query.get_or_404(job_id)
+        result = clear_workbook_region(db, job_id, subsidiary_id, MasterCashbookTransaction)
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook-rerun/<int:subsidiary_id>', methods=['POST'])
+def master_cashbook_workbook_rerun(job_id, subsidiary_id):
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+        ProcessingJob.query.get_or_404(job_id)
+        result = rerun_workbook_region(
+            db, job_id, subsidiary_id,
+            MasterCashbookTransaction, MatchedTransaction, ReconciliationResults,
+        )
+        status = master_status(db, MasterCashbookTransaction, CashbookTransaction, ProcessingJob, job_id)
+        return jsonify({'success': True, 'result': result, 'status': status})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/check-uk-bacs', methods=['POST'])
+def master_cashbook_check_uk_bacs(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        result = check_uk_bacs_transtypes(db, job_id, MasterCashbookTransaction)
+        return jsonify({'success': True, **result})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/check-partner-transfer', methods=['POST'])
+def master_cashbook_check_partner_transfer(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        result = check_partner_transfer_transtypes(db, job_id, MasterCashbookTransaction)
+        return jsonify({'success': True, **result})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/check-sepa-netting', methods=['POST'])
+def master_cashbook_check_sepa_netting(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        result = check_sepa_netting(db, job_id, MasterCashbookTransaction)
+        return jsonify({'success': True, **result})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/summary')
+def master_cashbook_workbook_summary(job_id):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        summary = workbook_summary(job_id, MasterCashbookTransaction)
+        return jsonify({'success': True, **summary})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/<tab_key>/column-values/<column>')
+def master_cashbook_workbook_column_values(job_id, tab_key, column):
+    try:
+        import json as _json
+        ProcessingJob.query.get_or_404(job_id)
+        unusual_only = request.args.get('unusual_only', '').lower() in ('1', 'true', 'yes')
+        global_search = request.args.get('q', '').strip() or None
+        col_filters_raw = request.args.get('filters', '')
+        try:
+            col_filters = _json.loads(col_filters_raw) if col_filters_raw else {}
+        except Exception:
+            col_filters = {}
+        limit = min(500, max(10, int(request.args.get('limit', 300))))
+        values = workbook_column_distinct_values(
+            MasterCashbookTransaction, job_id, tab_key, column,
+            unusual_only=unusual_only,
+            col_filters=col_filters,
+            global_search=global_search,
+            limit=limit,
+        )
+        return jsonify({
+            'success': True,
+            'tab_key': tab_key.lower(),
+            'column': column.lower(),
+            'values': values,
+            'truncated': len(values) >= limit,
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/workbook/<tab_key>')
+def master_cashbook_workbook_tab(job_id, tab_key):
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        import json as _json
+        page        = max(1, int(request.args.get('page', 1)))
+        per_page    = min(500, max(10, int(request.args.get('per_page', 100))))
+        unusual_only  = request.args.get('unusual_only', '').lower() in ('1', 'true', 'yes')
+        sort_by       = request.args.get('sort_by', None)
+        sort_dir      = 'desc' if request.args.get('sort_dir', 'asc') == 'desc' else 'asc'
+        global_search = request.args.get('q', '').strip() or None
+        col_filters_raw = request.args.get('filters', '')
+        try:
+            col_filters = _json.loads(col_filters_raw) if col_filters_raw else {}
+        except Exception:
+            col_filters = {}
+
+        rows, total = master_rows_for_workbook_tab(
+            MasterCashbookTransaction, job_id, tab_key, page, per_page,
+            unusual_only=unusual_only,
+            sort_by=sort_by, sort_dir=sort_dir,
+            col_filters=col_filters, global_search=global_search,
+        )
+        items = [master_row_workbook_dict(r) for r in rows]
+        unusual_matched = sum(1 for i in items if i.get('highlight_unusual_match'))
+        # Full-tab stats (unfiltered counts for dashboard tiles)
+        all_rows_for_tab, _ = master_rows_for_workbook_tab(
+            MasterCashbookTransaction, job_id, tab_key, page=1, per_page=99999
+        )
+        stats = workbook_tab_stats(all_rows_for_tab)
+        is_filtered = bool(col_filters or global_search)
+        return jsonify({
+            'success': True,
+            'tab_key': tab_key.lower(),
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page if total else 0,
+            'unusual_only': unusual_only,
+            'unusual_matched_on_page': unusual_matched,
+            'sort_by': sort_by,
+            'sort_dir': sort_dir,
+            'is_filtered': is_filtered,
+            'stats': stats,
+            'items': items,
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/master-cashbook/<int:job_id>/download-workbook')
+def master_cashbook_download_workbook(job_id):
+    from flask import Response
+    try:
+        ProcessingJob.query.get_or_404(job_id)
+        if MasterCashbookTransaction.query.filter_by(job_id=job_id).count() == 0:
+            return jsonify({'error': 'No master cashbook loaded'}), 404
+        output = export_workbook_excel(job_id, MasterCashbookTransaction)
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename=master_cashbook_workbook_job_{job_id}.xlsx'
+            },
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/receipts', methods=['GET', 'POST'])
@@ -2471,6 +2880,20 @@ def clear_stripe_automation_data(job_id):
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# Stripe Automation PFR COL I fees are EU-only (subsidiary 4).
+PFR_SUBSIDIARY_ID = 4
+
+
+def get_pfr_coli_fees_total(job_id, subsidiary_id=None):
+    """Return persisted PFR COL I fees; only non-zero for EU."""
+    if subsidiary_id is not None and subsidiary_id != PFR_SUBSIDIARY_ID:
+        return 0.0
+    state = StripeAutomationState.query.filter_by(job_id=job_id).first()
+    if not state or state.pfr_coli_fees_total is None:
+        return 0.0
+    return round(float(state.pfr_coli_fees_total), 2)
+
+
 @app.route('/api/stripe-automation/fix-payment-failures/<int:job_id>', methods=['POST'])
 def fix_payment_failures(job_id):
     """Fix Payment Failure Refunds by extracting payment ID and finding matching charge - COPY to processed table"""
@@ -2596,34 +3019,33 @@ def fix_payment_failures(job_id):
             state.pfr_coli_fees_total = pfr_fees_total
 
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'fixed_count': fixed_count,
             'not_found_count': not_found_count,
-            'details': f'Extracted payment IDs and copied all data to processed table',
+            'details': 'Extracted payment IDs and copied all data to processed table',
             'replacements': replacements,
-            'pfr_coli_fees_total': round(pfr_fees_total, 2)
+            'pfr_coli_fees_total': round(pfr_fees_total, 2),
         })
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
 @app.route('/api/stripe-automation/state/<int:job_id>')
-def get_stripe_automation_state(job_id):
-    """Get persisted Stripe automation state for this job"""
+@app.route('/api/stripe-automation/state/<int:job_id>/<int:subsidiary_id>')
+def get_stripe_automation_state(job_id, subsidiary_id=None):
+    """Get persisted Stripe automation PFR fees (EU subsidiary only when subsidiary_id given)."""
     try:
-        state = StripeAutomationState.query.filter_by(job_id=job_id).first()
         return jsonify({
             'success': True,
-            'pfr_coli_fees_total': round(state.pfr_coli_fees_total, 2) if state and state.pfr_coli_fees_total is not None else 0.0
+            'pfr_coli_fees_total': get_pfr_coli_fees_total(job_id, subsidiary_id),
+            'pfr_subsidiary_id': PFR_SUBSIDIARY_ID,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/stripe-automation/remove-netted/<int:job_id>', methods=['POST'])
 def remove_netted_transactions(job_id):
@@ -4931,6 +5353,57 @@ def get_matched_transactions_results(job_id, subsidiary_id):
 # Original data changes → Journal data updates
 # Journal data changes → Original data NEVER affected
 
+
+def matching_complete_for_journal(job_id, subsidiary_id):
+    """True when reconciliation processes 1–3 have run and matches exist."""
+    process_nums = {
+        r.process_number
+        for r in ReconciliationResults.query.filter_by(
+            job_id=job_id, subsidiary_id=subsidiary_id
+        ).all()
+    }
+    if not {1, 2, 3}.issubset(process_nums):
+        return False
+    return MatchedTransaction.query.filter_by(
+        job_id=job_id, subsidiary_id=subsidiary_id
+    ).count() > 0
+
+
+def count_unmatched_stripe_charges_refunds(job_id, subsidiary_id):
+    """Count unmatched Stripe charge/refund rows (same rules as download endpoint)."""
+    matched_stripe_ids = {
+        m.stripe_id for m in MatchedTransaction.query.filter_by(
+            job_id=job_id, subsidiary_id=subsidiary_id
+        ).all() if m.stripe_id
+    }
+    count = 0
+    for tx in StripeTransaction.query.filter_by(job_id=job_id, subsidiary_id=subsidiary_id).all():
+        if tx.id in matched_stripe_ids:
+            continue
+        tx_type = (tx.type or '').lower()
+        if tx_type in ('charge', 'refund'):
+            count += 1
+    return count
+
+
+@app.route('/api/journal-prep-ready/<int:job_id>/<int:subsidiary_id>')
+def journal_prep_ready(job_id, subsidiary_id):
+    """Whether journal preparation is available for this job/region."""
+    try:
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+        ready = matching_complete_for_journal(job_id, subsidiary_id)
+        unmatched_stripe = count_unmatched_stripe_charges_refunds(job_id, subsidiary_id) if ready else 0
+        return jsonify({
+            'success': True,
+            'ready': ready,
+            'unmatched_stripe_count': unmatched_stripe,
+            'journal_prep_url': f'/journal-preparation/{job_id}/{subsidiary_id}',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/journals/sync/<int:job_id>/<int:subsidiary_id>', methods=['POST'])
 def sync_journal_data(job_id, subsidiary_id):
     """Sync data from MatchedTransaction to JournalTransaction (ONE-WAY SYNC)"""
@@ -5677,21 +6150,19 @@ def get_financial_summary(job_id, subsidiary_id):
             if tx.type in ['Network Cost', 'Stripe Fee'] and tx.net is not None:
                 type_fees_net += tx.net
         
-        # Calculate UNMATCHED Payment Failure Refunds
-        # PFR are excluded from matching, so all PFR are unmatched
-        # Use AMOUNT value but apply NET's sign (if Net is negative, make Amount negative)
+        # Calculate UNMATCHED Payment Failure Refunds (EU only)
         pfr_amount_signed = 0
         pfr_count = 0
-        for tx in all_stripe:
-            if tx.type == 'Payment Failure Refund':
-                amount = tx.amount if tx.amount is not None else 0
-                net = tx.net if tx.net is not None else 0
-                # Apply Net's sign to Amount
-                if net < 0:
-                    pfr_amount_signed += -abs(amount)
-                else:
-                    pfr_amount_signed += abs(amount)
-                pfr_count += 1
+        if subsidiary_id == PFR_SUBSIDIARY_ID:
+            for tx in all_stripe:
+                if tx.type == 'Payment Failure Refund':
+                    amount = tx.amount if tx.amount is not None else 0
+                    net = tx.net if tx.net is not None else 0
+                    if net < 0:
+                        pfr_amount_signed += -abs(amount)
+                    else:
+                        pfr_amount_signed += abs(amount)
+                    pfr_count += 1
         
         # Calculate UNMATCHED Other Transactions (Adjustments, etc.)
         # Use AMOUNT value but apply NET's sign
@@ -7163,33 +7634,47 @@ def fp_list_files(job_id, subsidiary_id):
 def journal_status(job_id, subsidiary_id):
     """Check if journals have been generated for this job/subsidiary"""
     try:
-        # Check if journals exist
+        if subsidiary_id not in SUBSIDIARY_LABELS:
+            return jsonify({'success': False, 'error': 'Invalid subsidiary'}), 400
+
+        matching_ready = matching_complete_for_journal(job_id, subsidiary_id)
+        journal_prep_url = f'/journal-preparation/{job_id}/{subsidiary_id}'
+
         existing_journals = JournalTransaction.query.filter_by(
             job_id=job_id,
             subsidiary_id=subsidiary_id
         ).first()
-        
+
+        memo = ''
+        if existing_journals and existing_journals.journal_memo:
+            memo = existing_journals.journal_memo
+
         if existing_journals:
-            # Count total journals
             total_count = JournalTransaction.query.filter_by(
                 job_id=job_id,
                 subsidiary_id=subsidiary_id
             ).count()
-            
+
             return jsonify({
                 'success': True,
                 'journals_exist': True,
                 'total_journals': total_count,
+                'memo': memo,
+                'matching_ready': matching_ready,
+                'journal_prep_url': journal_prep_url,
                 'message': 'Journals have been generated. Use Clear Journals to delete before regenerating.'
             })
-        else:
-            return jsonify({
-                'success': True,
-                'journals_exist': False,
-                'total_journals': 0,
-                'message': 'No journals generated yet. You can generate journals now.'
-            })
-            
+
+        return jsonify({
+            'success': True,
+            'journals_exist': False,
+            'total_journals': 0,
+            'memo': memo,
+            'matching_ready': matching_ready,
+            'journal_prep_url': journal_prep_url,
+            'message': 'No journals generated yet. You can generate journals now.'
+        })
+
     except Exception as e:
         return jsonify({'success': False, 'error': f'Error checking journal status: {str(e)}'}), 500
 

@@ -10,6 +10,8 @@ from typing import Dict, Optional
 from datetime import datetime
 import calendar
 
+from journal_generation.journal_builder import resolve_invoice_number, resolve_payment_number
+
 
 def _cashbook_location_for_region(row: pd.Series) -> str:
     """EU master uses 'Location'; generic builder uses 'location'. Empty if missing."""
@@ -460,18 +462,10 @@ class JournalBuilderEU:
         elif 'Location' in df_export.columns:
             df_export['Location'] = df_export['Location'].fillna('').astype(str)
         
-        # Generate invoice # and payment # for ALL rows
+        # Generate invoice # and payment # — prefer master/cashbook values from upload
         if 'client_id' in df_export.columns and 'invoice_number' in df_export.columns:
-            df_export['invoice #'] = df_export.apply(
-                lambda row: f"CPMT: {row['client_id']}-{row['invoice_number']}" 
-                if pd.notna(row.get('client_id')) and pd.notna(row.get('invoice_number')) 
-                else '', axis=1
-            )
-            df_export['payment #'] = df_export.apply(
-                lambda row: f"CPMT: {row['client_id']}-{row['invoice_number']}-{row['payment_date']}" 
-                if pd.notna(row.get('client_id')) and pd.notna(row.get('invoice_number')) and pd.notna(row.get('payment_date'))
-                else '', axis=1
-            )
+            df_export['invoice #'] = df_export.apply(resolve_invoice_number, axis=1)
+            df_export['payment #'] = df_export.apply(resolve_payment_number, axis=1)
         
         # Ensure all expected columns exist (add missing ones with empty values)
         for col in expected_columns:

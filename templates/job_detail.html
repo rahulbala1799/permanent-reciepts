@@ -10,6 +10,7 @@
 </head>
 <body>
 {% set nav_active = 'receipts' %}
+{% set nav_reconciliation_job_id = job_id %}
 {% set nav_extra_links = [{'href': url_for('receipts_page'), 'label': 'Job Details', 'active': true}] %}
 {% include 'partials/navbar.html' %}
 

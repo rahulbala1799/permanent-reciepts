@@ -10,6 +10,8 @@
 </head>
 <body>
 {% set nav_active = 'receipts' %}
+{% set nav_master_cashbook_job_id = job_id %}
+{% set nav_subsidiary_id = subsidiary_id %}
 {% set nav_extra_links = [] %}
 {% include 'partials/navbar.html' %}
 
@@ -52,6 +54,9 @@
                         <a class="btn btn-dark" href="/process-partner-transfers/{{ job_id }}/{{ subsidiary_id }}" id="process-partner-transfers-btn" style="display: none;">
                             <i class="fas fa-exchange-alt"></i> Process Partner Transfers
                         </a>
+                        <a class="btn btn-info" id="journal-prep-btn" href="/journal-preparation/{{ job_id }}/{{ subsidiary_id }}" style="display: none;">
+                            <i class="fas fa-file-invoice"></i> Journal Preparation
+                        </a>
                     </div>
                 </div>
             </div>
@@ -91,6 +96,22 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% set _wb_labels = {1:'AU',2:'CA',3:'US',4:'EU',5:'UK'} %}
+        <div class="row mt-4">
+            <div class="col-md-12">
+                <div class="card border-info">
+                    <div class="card-header bg-info text-white py-2">
+                        <h6 class="mb-0"><i class="fas fa-book"></i> Master Cashbook Workbook</h6>
+                    </div>
+                    <div class="card-body py-2">
+                        {% set wb_job_id = job_id %}{% set wb_subsidiary_id = subsidiary_id %}{% set wb_region_label = _wb_labels.get(subsidiary_id, 'Region') %}{% set wb_layout = 'inline' %}
+                        {% include 'partials/workbook_actions.html' %}
+                        <a href="/prepare/master-cashbook/{{ job_id }}" class="btn btn-sm btn-outline-primary ms-2">Open Master Cashbook</a>
                     </div>
                 </div>
             </div>
@@ -296,6 +317,8 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/workbook_actions.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/region_nav.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const jobId = {{ job_id }};
@@ -307,6 +330,7 @@
             loadSubsidiaryReceipts();
             checkStripeData();
             checkCashbookData();
+            RegionNav.initNavLink(jobId, subsidiaryId, 'journal-prep-btn');
             
             // Set up periodic updates
             setInterval(() => {

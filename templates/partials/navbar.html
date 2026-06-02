@@ -5,6 +5,22 @@
             <a class="nav-link{% if nav_active == 'dashboard' %} active{% endif %}" href="{{ url_for('index') }}">Dashboard</a>
             <a class="nav-link{% if nav_active == 'receipts' %} active{% endif %}" href="{{ url_for('receipts_page') }}">Reconciliation Jobs</a>
             <a class="nav-link{% if nav_active == 'client_regions' %} active{% endif %}" href="{{ url_for('client_regions_page') }}">Client Regions</a>
+            {% set rec_job_id = nav_reconciliation_job_id or nav_master_cashbook_job_id %}
+            {% if rec_job_id %}
+            <a class="nav-link{% if nav_active == 'rec_hub' %} active{% endif %}" href="/reconciliation/{{ rec_job_id }}">
+                <i class="fas fa-building me-1"></i>Select Subsidiary
+            </a>
+            {% endif %}
+            {% if nav_master_cashbook_job_id %}
+            <a class="nav-link{% if nav_active == 'master_cashbook' %} active{% endif %}" href="/prepare/master-cashbook/{{ nav_master_cashbook_job_id }}">Master Cashbook</a>
+            {% endif %}
+            {% if nav_master_cashbook_job_id and nav_subsidiary_id %}
+            <a class="nav-link{% if nav_active == 'journal_prep' %} active{% endif %}" id="nav-journal-prep-link"
+               href="/journal-preparation/{{ nav_master_cashbook_job_id }}/{{ nav_subsidiary_id }}"
+               style="{% if nav_active != 'journal_prep' %}display:none{% endif %}">
+                <i class="fas fa-file-invoice me-1"></i>Journal Preparation
+            </a>
+            {% endif %}
             {% for link in nav_extra_links or [] %}
             <a class="nav-link{% if link.active %} active{% endif %}" href="{{ link.href }}"
                {% if link.onclick %}onclick="{{ link.onclick }}"{% endif %}>{{ link.label }}</a>
@@ -12,3 +28,11 @@
         </div>
     </div>
 </nav>
+{% if nav_master_cashbook_job_id and nav_subsidiary_id and nav_active != 'journal_prep' %}
+<script src="{{ url_for('static', filename='js/region_nav.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    RegionNav.initNavLink({{ nav_master_cashbook_job_id }}, {{ nav_subsidiary_id }});
+});
+</script>
+{% endif %}
